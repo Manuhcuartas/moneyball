@@ -190,7 +190,7 @@ def get_advanced_stats(db: Session, min_games=3, min_minutes=10):
     final_stats['Rol Tactical'] = final_stats.apply(definir_rol_dinamico, axis=1)
     final_stats['Posicion'] = final_stats.apply(estimar_posicion, axis=1)
 
-    # 8. LIMPIEZA FINAL
+   # 8. LIMPIEZA FINAL
     final_stats.columns = [
         'Jugador', 'Equipo', 'Dorsal', 'PJ', 'MPP', 'PPP', 'RPP', 'ROf', 'RDef', 'Rec', 'APP', 
         'perdidas_mean', 't3_intentados_mean', 'fga_mean', 
@@ -203,12 +203,18 @@ def get_advanced_stats(db: Session, min_games=3, min_minutes=10):
     ].copy()
 
     # Redondeos
-    final_stats['USG_pct'] = final_stats['USG%'].round(1)
-    final_stats['TS_pct'] = (final_stats['TS%'] * 100).round(1)
-    final_stats['eFG_pct'] = (final_stats['eFG%'] * 100).round(1)
+    final_stats['USG%'] = final_stats['USG%'].round(1)
+    final_stats['TS%'] = (final_stats['TS%'] * 100).round(1)
+    final_stats['eFG%'] = (final_stats['eFG%'] * 100).round(1)
     final_stats['GmSc'] = final_stats['GmSc'].round(1)
     final_stats['PPP'] = final_stats['PPP'].round(1)
     final_stats['RPP'] = final_stats['RPP'].round(1)
     final_stats['APP'] = final_stats['APP'].round(1)
     
-    return final_stats
+    # RENOMBRADO FINAL CLAVE
+    return final_stats.rename(columns={
+        "USG%": "USG_pct",
+        "TS%": "TS_pct",
+        "eFG%": "eFG_pct",
+        "Rol Tactical": "Rol_Tactical"  # <--- ESTO ES VITAL
+    })

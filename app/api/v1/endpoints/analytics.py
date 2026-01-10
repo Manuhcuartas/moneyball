@@ -3,16 +3,57 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 
 # Importamos los repositorios antiguos
-from app.repositories.shot_repository import ShotRepository
 from app.models.shot import Shot
 from app.schemas.shot import ShotResponse
 from app.repositories.analytics_repository import AnalyticsRepository
 from app.schemas.stats import GameStats, GameAdvancedStats, MoneyballResponse
+from app.models.stats import PlayerStat
 
 # IMPORTAMOS EL NUEVO SERVICIO DE PANDAS
 from app.services.analytics import get_advanced_stats 
 
+from app.schemas.stats import MoneyballResponse, PlayerProfileResponse
+
 router = APIRouter()
+
+@router.get("/player/profile", response_model=PlayerProfileResponse)
+def get_player_profile(
+    name: str = Query(...),
+    team: str = Query(None),
+    db: Session = Depends(get_db)
+):
+    # 1. Obtenemos Stats de TODOS (para percentiles)
+    df = get_advanced_stats(db, min_games=1, min_minutes=5)
+    
+    if df.empty: raise HTTPException(404, "Sin datos")
+
+    # 2. Filtramos al jugador
+    player_row = df[df['Jugador'].str.lower() == name.lower()]
+    if team: player_row = player_row[player_row['Equipo'].str.contains(team, case=False)]
+        
+    if player_row.empty: raise HTTPException(404, f"Jugador '{name}' no encontrado")
+        
+    profile_data = player_row.to_dict(orient="records")[0]
+
+    # 3. Obtenemos Tiros
+    p_stat = db.query(PlayerStat).filter(PlayerStat.nombre == profile_data['Jugador']).first()
+    if not p_stat: return {"profile": profile_data, "shots": []}
+
+    # Buscamos tiros por dorsal y partidos jugados
+    # (Simplificado: buscamos por nombre de jugador en tabla Shots si tienes player_id o cruce)
+    # Si tu tabla Shot tiene dorsal, usaremos eso + game_ids del jugador
+    stats_jugador = db.query(PlayerStat).filter(PlayerStat.nombre == profile_data['Jugador']).all()
+    game_ids = [s.game_id for s in stats_jugador]
+    
+    # Asumiendo que el dorsal es constante, cogemos el del primer partido
+    dorsal = stats_jugador[0].dorsal 
+
+    shots = db.query(Shot).filter(
+        Shot.dorsal == dorsal,
+        Shot.game_id.in_(game_ids)
+    ).all()
+
+    return {"profile": profile_data, "shots": shots}
 
 # --- ENDPOINT NUEVO: MONEYBALL REAL (TEMPORADA COMPLETA) ---
 @router.get("/season/advanced", response_model=MoneyballResponse)
