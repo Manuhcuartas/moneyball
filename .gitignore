@@ -1,0 +1,26 @@
+# .gitignore
+
+# Entorno virtual (¡Nunca subir esto!)
+venv/
+.venv/
+env/
+
+# Archivos compilados de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Variables de entorno y secretos (¡Seguridad!)
+.env
+
+# Base de datos local (si usas SQLite)
+*.db
+*.sqlite3
+
+# Archivos de Excel generados por el crawler (opcional, si no quieres subirlos)
+*.xlsx
+*.csv
+
+# Carpetas de IDE
+.vscode/
+.idea/

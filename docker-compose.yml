@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: moneyball-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: admin  # Contraseña sencilla para desarrollo local
+      POSTGRES_DB: moneyball
+    ports:
+      - "5432:5432"  # Mapea puerto local : puerto contenedor
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:  # Esto hace que los datos persistan aunque borres el contenedor
