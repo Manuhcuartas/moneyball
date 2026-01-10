@@ -157,42 +157,41 @@ def get_advanced_stats(db: Session, min_games=3, min_minutes=10):
         return "Jugador de Rotación"
 
     def estimar_posicion(row):
-        # Si no hay datos suficientes, es rotación
         if pd.isna(row.get('P_3PA')): return "Rotación"
 
-        # Extraemos variables para que el código sea legible
-        p_reb = row.get('P_REB', 0)      # Percentil Rebotes (Proxy de Tamaño/Posición Interior)
-        p_ast = row.get('P_AST', 0)      # Percentil Asistencias (Proxy de Dirección de juego)
-        p_3pa = row.get('P_3PA', 0)      # Percentil Volumen Triples (Factor Espaciado)
-        rim_freq = row.get('rim_freq', 0) # % de tiros bajo el aro (Factor "Pintura")
+        p_reb = row.get('P_REB', 0)      
+        p_ast = row.get('P_AST', 0)      
+        p_3pa = row.get('P_3PA', 0)      
+        rim_freq = row.get('rim_freq', 0)
 
-        # 1. ¿ES UN INTERIOR? (La prueba del algodón es el rebote)
-        # Si está en el Top 25% de rebote o combina buen rebote con mucho juego en la pintura
-        if p_reb > 0.75 or (p_reb > 0.60 and rim_freq > 0.45):
-            # Si además tira mucho de fuera (>55%), es un 4 abierto
-            if p_3pa > 0.55: return "Ala-Pívot (PF)"
-            # Si no tira, es un 5 clásico
-            return "Pívot (C)"
-
-        # 2. ¿ES UN DIRECTOR DE JUEGO?
-        # Si no es un gigante, pero asiste mucho (Top 20%)
-        if p_ast > 0.80:
+        # 1. BASE PURO (PG)
+        # Exigimos ser ÉLITE absoluta en pases (Top 10%) para ser Base independientemente de la altura.
+        # O bien, ser un muy buen pasador (Top 25%) Y NO ser gigante (Rebote bajo).
+        if p_ast > 0.90 or (p_ast > 0.75 and p_reb < 0.70):
             return "Base (PG)"
 
-        # 3. ZONA DE ALEROS Y ESCOLTAS (Wings)
-        # Aquí el rebote es lo que diferencia a un "2" (Escolta) de un "3" (Alero)
-        
-        # Alero: Buen rebote para ser exterior (>50%)
-        if p_reb > 0.50:
-            if p_3pa > 0.40: return "Alero (SF)"
-            return "Alero/Interior (F)" # Tweener (ni tira mucho ni es gigante)
+        # 2. INTERIORES (Bigs)
+        # Si rebotea mucho, es interior... PERO:
+        if p_reb > 0.75 or (p_reb > 0.60 and rim_freq > 0.45):
+            # ...si asiste bastante, es un "Point Forward" (Alero Generador), no un Pívot tosco.
+            if p_ast > 0.65:
+                return "Alero/Generador (Point Fwd)"
+            
+            # Clasificación clásica de interiores
+            if p_3pa > 0.55: return "Ala-Pívot (PF)"
+            return "Pívot (C)"
 
-        # Escolta: Poco rebote, orientado al triple o al pase secundario
-        if p_3pa > 0.60: return "Escolta (SG)"
+        # 3. EXTERIORES (Wings/Guards)
+        # Si no ha caído en los grupos anteriores:
         
-        # 4. CASOS HÍBRIDOS
-        if p_ast > 0.60: return "Combo Guard (G)" # Base/Escolta
-
+        # COMBO GUARD: Asiste bien y tira/anota
+        if p_ast > 0.60: return "Combo Guard (CG)" 
+        
+        # ALERO vs ESCOLTA: El rebote manda
+        if p_reb > 0.60: return "Alero (SF)" # Ayuda al rebote
+        
+        if p_3pa > 0.60: return "Escolta (SG)" # Tirador puro
+        
         return "Exterior (G/F)"
 
     final_stats['Rol Tactical'] = final_stats.apply(definir_rol_dinamico, axis=1)
