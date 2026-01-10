@@ -25,6 +25,62 @@ def load_data(min_games, min_minutes, team_filter=None):
     finally:
         db.close()
 
+def draw_radar_chart(df, player_name):
+    # Buscamos al jugador
+    player_stats = df[df['Jugador'] == player_name].iloc[0]
+    
+    # Definimos las métricas (Percentiles) y sus etiquetas bonitas
+    categories = ['Uso Ofensivo', 'Eficiencia Tiro', 'Creación/Pase', 'Rebote', 'Impacto Defensivo']
+    
+    # Valores (multiplicamos por 100 para que sea 0-100)
+    values = [
+        player_stats.get('P_USG', 0) * 100,
+        player_stats.get('P_EFF', 0) * 100,
+        player_stats.get('P_AST', 0) * 100,
+        player_stats.get('P_REB', 0) * 100,
+        player_stats.get('P_DEF', 0) * 100
+    ]
+    
+    # Cerramos el polígono repitiendo el primer valor
+    values += values[:1]
+    categories += categories[:1]
+
+    fig = go.Figure()
+
+    # Dibujamos el área del jugador
+    fig.add_trace(go.Scatterpolar(
+        r=values,
+        theta=categories,
+        fill='toself',
+        name=player_name,
+        line_color='#00CC96',
+        opacity=0.7
+    ))
+
+    # Configuración estética
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 100],
+                showticklabels=False, 
+                linecolor='grey'
+            ),
+            angularaxis=dict(
+                color='white',
+                tickfont=dict(size=12) # <--- CORRECCIÓN AQUÍ (Estaba fuera)
+            ),
+            bgcolor="rgba(0,0,0,0)"
+        ),
+        showlegend=False,
+        title=dict(text=f"Perfil Moneyball: {player_stats['Rol Tactical']}", x=0.5),
+        height=400,
+        margin=dict(t=40, b=20, l=40, r=40),
+        template="plotly_dark"
+    )
+    
+    return fig
+
 def draw_shot_chart(df_shots, title="Mapa de Tiros"):
     fig = go.Figure()
 
@@ -202,7 +258,7 @@ fig_scatter = px.scatter(
 fig_scatter.add_hline(y=50, line_dash="dash", annotation_text="Eficiencia Media")
 fig_scatter.add_vline(x=20, line_dash="dash", annotation_text="Uso Medio")
 
-st.plotly_chart(fig_scatter, use_container_width=True)
+st.plotly_chart(fig_scatter, width="stretch")
 
 st.divider()
 st.subheader("🔥 Análisis Geográfico (Shot Chart)")
@@ -241,3 +297,49 @@ if jugador_mapa:
             st.table(df_display[['period', 'action_type', 'zone', 'Resultado']])
     else:
         st.info(f"No hay eventos de coordenadas para {jugador_mapa}.")
+
+# --- SECCIÓN: SCOUTING INDIVIDUAL ---
+st.divider()
+st.subheader("🕵️ Ficha de Scouting")
+
+# Selector de jugador unificado para toda la sección
+lista_jugadores = sorted(df['Jugador'].unique())
+jugador_sel = st.selectbox("Selecciona un jugador para analizar:", lista_jugadores, key="scout_player")
+
+if jugador_sel:
+    # FILA SUPERIOR: DATOS Y RADAR
+    col_izq, col_der = st.columns([1, 1])
+    
+    with col_izq:
+        # Gráfico de Radar
+        fig_radar = draw_radar_chart(df, jugador_sel)
+        st.plotly_chart(fig_radar, width="stretch")
+        # Datos clave debajo del radar
+        info = df[df['Jugador'] == jugador_sel].iloc[0]
+        st.info(f"""
+        **Posición Estimada:** {info['Posicion']}  
+        **Rol Táctico:** {info['Rol Tactical']}  
+        **Game Score:** {info['GmSc']}
+        """)
+
+    with col_der:
+        # Mapa de Tiros
+        df_shots_jugador = load_shots(jugador_sel)
+        if not df_shots_jugador.empty:
+            st.caption("Mapa de Tiros (Temporada)")
+            # Reusamos tu función de mapa
+            fig_mapa = draw_shot_chart(df_shots_jugador, title="") 
+            st.plotly_chart(fig_mapa, width='stretch', key=f"map_{jugador_sel}")
+            
+            # Pequeño resumen de efectividad
+            r_zona = df_shots_jugador.groupby('zone')['is_made'].mean() * 100
+            if not r_zona.empty:
+                 mej_zona = r_zona.idxmax()
+                 st.caption(f"🔥 Zona favorita: **{mej_zona}** ({r_zona.max():.1f}%)")
+        else:
+            st.warning("⚠️ No hay datos de tiro registrados (Shot Chart) para este jugador.")
+
+    # FILA INFERIOR: TABLA DE TIROS (Opcional, en acordeón para no molestar)
+    if not df_shots_jugador.empty:
+        with st.expander("Ver registro detallado de lanzamientos"):
+            st.dataframe(df_shots_jugador[['game_id', 'period', 'zone', 'action_type', 'is_made']], use_container_width=True)
