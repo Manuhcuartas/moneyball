@@ -128,6 +128,17 @@ if df.empty:
     st.warning("No hay datos disponibles en la base de datos.")
     st.stop()
 
+# --- TABLA ---
+st.divider()
+
+# MODIFICA ESTA LÍNEA PARA AÑADIR "Posicion" y "Rol Tactical"
+cols_show = ["Jugador", "Equipo", "Posicion", "Rol Tactical", "GmSc", "TS_pct", "eFG_pct", "USG_pct", "PPP", "RPP", "APP", "MPP", "PJ"]
+
+st.dataframe(
+    df[cols_show].style.background_gradient(subset=["GmSc", "TS_pct"], cmap="Greens"),
+    use_container_width=True
+)
+
 # Filtro de Equipo
 equipos_disponibles = ["Todos"] + sorted(df['Equipo'].unique().tolist())
 equipo_seleccionado = st.sidebar.selectbox("Filtrar por Equipo", equipos_disponibles)

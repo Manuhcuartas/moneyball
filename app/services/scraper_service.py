@@ -180,6 +180,7 @@ class ScraperService:
     def ingest_shot_chart(self, game_id: str):
         """
         Extrae y guarda todos los eventos de tiro (coordenadas) de un partido.
+        Limpia los tiros anteriores de ese partido para evitar duplicados.
         """
         url = f"{self.base_url}/envivo/mapa-de-tiro.ashx"
         payload = {
@@ -197,8 +198,18 @@ class ScraperService:
                 return False
 
             shots_raw = data.get("mapadetiro", {}).get("tiros", [])
+            
+            # --- NUEVO: BORRADO PREVENTIVO ---
+            # Importamos el modelo aquí para evitar ciclos si fuera necesario, 
+            # o asegúrate de tenerlo arriba: from app.models.shot import Shot
+            from app.models.shot import Shot
+            
+            # Borramos los tiros viejos de este partido antes de meter los nuevos
+            self.db.query(Shot).filter(Shot.game_id == game_id).delete()
+            self.db.commit()
+            
             if not shots_raw:
-                return True # No hay tiros registrados todavía
+                return True # No hay tiros, pero ya limpiamos por si acaso
 
             # Preparamos los datos para el repositorio
             shots_to_ingest = []
@@ -212,16 +223,17 @@ class ScraperService:
                     zona=s["zona"],
                     metido=s["metido"],
                     fallado=s["fallado"],
-                    posicion_x=s["posicion_x"], # El validador de tu Schema limpiará el "%"
+                    posicion_x=s["posicion_x"],
                     posicion_y=s["posicion_y"]
                 ))
 
-            # Guardamos en bloque usando el repositorio que ya tienes
+            # Guardamos en bloque
             shot_repo = ShotRepository(self.db)
             count = shot_repo.create_batch(game_id, shots_to_ingest)
-            print(f"   🎯 {count} eventos de tiro procesados.")
+            print(f"   🎯 {count} eventos de tiro procesados (Limpieza previa OK).")
             return True
 
         except Exception as e:
+            self.db.rollback() # Importante hacer rollback si falla el borrado/insertado
             print(f"❌ Error en ingesta de tiros: {e}")
             return False
