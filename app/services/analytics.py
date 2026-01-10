@@ -164,33 +164,26 @@ def get_advanced_stats(db: Session, min_games=3, min_minutes=10):
         p_3pa = row.get('P_3PA', 0)      
         rim_freq = row.get('rim_freq', 0)
 
-        # 1. BASE PURO (PG)
-        # Exigimos ser ÉLITE absoluta en pases (Top 10%) para ser Base independientemente de la altura.
-        # O bien, ser un muy buen pasador (Top 25%) Y NO ser gigante (Rebote bajo).
-        if p_ast > 0.90 or (p_ast > 0.75 and p_reb < 0.70):
+        # 1. BASE (PG) - EL FILTRO
+        # Antes: Si p_ast > 0.90 entraba cualquiera.
+        # Ahora: Incluso si eres el mejor pasador (0.90), si rebotas como un pívot (>0.80),
+        # el sistema te bloquea aquí para que caigas en "Point Forward" más abajo.
+        if (p_ast > 0.90 and p_reb < 0.80) or (p_ast > 0.75 and p_reb < 0.70):
             return "Base (PG)"
 
-        # 2. INTERIORES (Bigs)
-        # Si rebotea mucho, es interior... PERO:
+        # 2. INTERIORES Y POINT FORWARDS
+        # Aquí caerán los "altos que asisten" que hemos rechazado arriba.
         if p_reb > 0.75 or (p_reb > 0.60 and rim_freq > 0.45):
-            # ...si asiste bastante, es un "Point Forward" (Alero Generador), no un Pívot tosco.
-            if p_ast > 0.65:
-                return "Alero/Generador (Point Fwd)"
+            # Si asistes mucho, eres el Point Forward
+            if p_ast > 0.65: return "Alero/Generador (Point Fwd)"
             
-            # Clasificación clásica de interiores
             if p_3pa > 0.55: return "Ala-Pívot (PF)"
             return "Pívot (C)"
 
         # 3. EXTERIORES (Wings/Guards)
-        # Si no ha caído en los grupos anteriores:
-        
-        # COMBO GUARD: Asiste bien y tira/anota
         if p_ast > 0.60: return "Combo Guard (CG)" 
-        
-        # ALERO vs ESCOLTA: El rebote manda
-        if p_reb > 0.60: return "Alero (SF)" # Ayuda al rebote
-        
-        if p_3pa > 0.60: return "Escolta (SG)" # Tirador puro
+        if p_reb > 0.60: return "Alero (SF)"
+        if p_3pa > 0.60: return "Escolta (SG)"
         
         return "Exterior (G/F)"
 

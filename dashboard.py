@@ -185,6 +185,8 @@ if df.empty:
     st.stop()
 
 # --- TABLA ---
+st.title("🏀 Moneyball FBPA: Análisis Avanzado")
+st.markdown(f"**{len(df)}** jugadores analizados | Temporada 25/26")
 st.divider()
 
 # MODIFICA ESTA LÍNEA PARA AÑADIR "Posicion" y "Rol Tactical"
@@ -209,8 +211,7 @@ if posicion_seleccionada != "Todas":
     df = df[df['Posicion'] == posicion_seleccionada]
 
 # --- PÁGINA PRINCIPAL ---
-st.title("🏀 Moneyball FBPA: Análisis Avanzado")
-st.markdown(f"**{len(df)}** jugadores analizados | Temporada 25/26")
+
 
 # KPIs Rápidos
 col1, col2, col3, col4 = st.columns(4)
@@ -266,37 +267,6 @@ st.subheader("🔥 Análisis Geográfico (Shot Chart)")
 # 1. Selección de Jugador
 lista_jugadores = sorted(df['Jugador'].unique())
 jugador_mapa = st.selectbox("Selecciona un jugador para ver su mapa de tiros", lista_jugadores, key="sel_jugador_mapa")
-
-# Cargar tiros
-if jugador_mapa:
-    df_shots_jugador = load_shots(jugador_mapa) 
-    
-    if not df_shots_jugador.empty:
-        # 2. Filtro opcional por partido (integrado aquí para evitar duplicados)
-        partidos_disponibles = ["Todos los partidos"] + sorted(df_shots_jugador['game_id'].unique().tolist())
-        partido_sel = st.selectbox("Filtrar mapa por partido específico", partidos_disponibles, key=f"sel_partido_{jugador_mapa}")
-        
-        df_mapa = df_shots_jugador.copy()
-        if partido_sel != "Todos los partidos":
-            df_mapa = df_mapa[df_mapa['game_id'] == partido_sel]
-
-        # 3. Renderizado del Mapa con KEY ÚNICA
-        fig_mapa = draw_shot_chart(df_mapa, title=f"Mapa de Tiros: {jugador_mapa} ({partido_sel})")
-        st.plotly_chart(fig_mapa, width='stretch', key=f"plot_mapa_{jugador_mapa}")
-
-        # 4. Tabla de Resumen
-        st.write(f"**Resumen por zonas:**")
-        resumen_zona = df_mapa.groupby('zone')['is_made'].agg(['sum', 'count'])
-        resumen_zona.columns = ['Anotados', 'Intentados']
-        resumen_zona['%'] = (resumen_zona['Anotados'] / resumen_zona['Intentados'] * 100).round(1)
-        st.dataframe(resumen_zona.T, width='stretch')
-        
-        with st.expander("Ver lista detallada de tiros"):
-            df_display = df_mapa[['period', 'action_type', 'zone', 'is_made']].copy()
-            df_display['Resultado'] = df_display['is_made'].apply(lambda x: "✅ Anotado" if x else "❌ Fallado")
-            st.table(df_display[['period', 'action_type', 'zone', 'Resultado']])
-    else:
-        st.info(f"No hay eventos de coordenadas para {jugador_mapa}.")
 
 # --- SECCIÓN: SCOUTING INDIVIDUAL ---
 st.divider()
