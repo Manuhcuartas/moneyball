@@ -36,7 +36,9 @@ def main():
             success = scraper.ingest_game_statistics(game)
             
             if success:
-                print("✅ OK")
+                scraper.ingest_shot_chart(game['id'])
+                print("✅ Boxscore + ShotChart OK")
+        
             else:
                 print("⚠️ Sin datos/Error")
             
@@ -45,6 +47,8 @@ def main():
             
         except Exception as e:
             print(f"❌ Error: {e}")
+
+        
 
     db.close()
     print("\n✨ PROCESO COMPLETADO ✨")

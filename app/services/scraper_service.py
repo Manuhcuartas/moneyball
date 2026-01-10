@@ -6,6 +6,8 @@ import urllib3
 from sqlalchemy.orm import Session
 from app.models.stats import Game, PlayerStat
 from app.core.config import settings
+from app.repositories.shot_repository import ShotRepository
+from app.schemas.shot import ShotIngest
 
 # Desactivar advertencias SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -173,4 +175,53 @@ class ScraperService:
         except Exception as e:
             self.db.rollback()
             print(f"❌ Error guardando: {e}")
+            return False
+        
+    def ingest_shot_chart(self, game_id: str):
+        """
+        Extrae y guarda todos los eventos de tiro (coordenadas) de un partido.
+        """
+        url = f"{self.base_url}/envivo/mapa-de-tiro.ashx"
+        payload = {
+            "id_dispositivo": self.id_dispositivo,
+            "key": self.key,
+            "id_partido": game_id
+        }
+
+        try:
+            r = requests.post(url, data=payload, headers=self.headers, verify=False, timeout=10)
+            data = r.json()
+
+            if data.get("resultado") != "correcto":
+                print(f"   ⚠️ Error ShotChart: {data.get('error')}")
+                return False
+
+            shots_raw = data.get("mapadetiro", {}).get("tiros", [])
+            if not shots_raw:
+                return True # No hay tiros registrados todavía
+
+            # Preparamos los datos para el repositorio
+            shots_to_ingest = []
+            for s in shots_raw:
+                shots_to_ingest.append(ShotIngest(
+                    equipo_id=s["equipo_id"],
+                    componente_id=s["componente_id"],
+                    dorsal=s["dorsal"],
+                    numero_periodo=s["numero_periodo"],
+                    accion_tipo=s["accion_tipo"],
+                    zona=s["zona"],
+                    metido=s["metido"],
+                    fallado=s["fallado"],
+                    posicion_x=s["posicion_x"], # El validador de tu Schema limpiará el "%"
+                    posicion_y=s["posicion_y"]
+                ))
+
+            # Guardamos en bloque usando el repositorio que ya tienes
+            shot_repo = ShotRepository(self.db)
+            count = shot_repo.create_batch(game_id, shots_to_ingest)
+            print(f"   🎯 {count} eventos de tiro procesados.")
+            return True
+
+        except Exception as e:
+            print(f"❌ Error en ingesta de tiros: {e}")
             return False
