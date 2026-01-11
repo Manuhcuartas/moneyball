@@ -37,7 +37,7 @@ class ScraperService:
             "id_fase": self.id_fase,
             "id_grupo": self.id_grupo,
             "fecha_inicial": "2025-09-01 00:00",
-            "fecha_final": "2026-06-30 23:59"
+            "fecha_final": "2026-10-01 23:59"
         }
         
         try:
