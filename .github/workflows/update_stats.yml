@@ -4,10 +4,10 @@ on:
   schedule:
     # Se ejecuta todos los lunes a las 08:00 AM UTC
     - cron: "0 8 * * 1"
-  workflow_dispatch: # Permite ejecutarlo manualmente desde GitHub
+  workflow_dispatch: # Permite ejecutarlo manualmente desde la pestaña Actions
 
 jobs:
-  build:
+  run-crawler:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -25,6 +25,11 @@ jobs:
 
       - name: Run Crawler
         env:
-          # Usa la URL de Neon guardada en los Secrets de GitHub
+          # Inyectamos los secretos configurados en GitHub
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          FBPA_BASE_URL: ${{ secrets.FBPA_BASE_URL }}
+          FBPA_ID_DISPOSITIVO: ${{ secrets.FBPA_ID_DISPOSITIVO }}
+          FBPA_ID_FASE: ${{ secrets.FBPA_ID_FASE }}
+          FBPA_ID_GRUPO: ${{ secrets.FBPA_ID_GRUPO }}
+          FBPA_ID_EQUIPO_PROPIO: ${{ secrets.FBPA_ID_EQUIPO_PROPIO }}
         run: python run_crawler.py

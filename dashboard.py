@@ -3,12 +3,13 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import requests
+import os
 
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="Moneyball FBPA", layout="wide", page_icon="🏀")
 
 # URL del Backend
-API_URL = "http://127.0.0.1:8000/api/v1"
+API_URL = os.getenv("API_INTERNAL_URL", "http://127.0.0.1:8000/api/v1")
 
 # --- FUNCIONES DE CARGA ---
 @st.cache_data(ttl=300)

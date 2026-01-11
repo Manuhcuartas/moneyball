@@ -1,18 +1,61 @@
 version: '3.8'
 
 services:
+  # 1. BASE DE DATOS
   db:
     image: postgres:15-alpine
     container_name: moneyball-db
     restart: always
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: admin  # Contraseña sencilla para desarrollo local
+      POSTGRES_PASSWORD: admin 
       POSTGRES_DB: moneyball
     ports:
-      - "5432:5432"  # Mapea puerto local : puerto contenedor
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. BACKEND (API)
+  api:
+    build: .
+    container_name: moneyball-api
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - .:/app  # "Hot Reload": Si cambias código en tu PC, se actualiza en Docker
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:admin@db:5432/moneyball
+      - FBPA_BASE_URL=https://appaficionfbpa.indalweb.net/v2
+      - FBPA_ID_DISPOSITIVO=${FBPA_ID_DISPOSITIVO}
+      - FBPA_ID_FASE=${FBPA_ID_FASE}
+      - FBPA_ID_GRUPO=${FBPA_ID_GRUPO}
+      - FBPA_ID_EQUIPO_PROPIO=${FBPA_ID_EQUIPO_PROPIO}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # 3. FRONTEND (DASHBOARD)
+  dashboard:
+    build: .
+    container_name: moneyball-dashboard
+    # Le decimos a Streamlit que arranque apuntando a la API interna
+    command: streamlit run dashboard.py
+    volumes:
+      - .:/app
+    ports:
+      - "8501:8501"
+    environment:
+      # TRUCO: Sobrescribimos la URL de la API para que apunte al contenedor 'api'
+      - API_INTERNAL_URL=http://api:8000/api/v1 
+      - DATABASE_URL=${DATABASE_URL}
+    depends_on:
+      - api
 
 volumes:
-  postgres_data:  # Esto hace que los datos persistan aunque borres el contenedor
+  postgres_data:
