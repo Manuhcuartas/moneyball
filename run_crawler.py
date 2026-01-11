@@ -3,31 +3,20 @@ import time
 from app.core.database import SessionLocal
 from app.services.scraper_service import ScraperService
 from app.core.config import settings
-import sys
 
-# CONFIGURACIÓN
-# Usamos el ID de la Atlética Avilesina como "pivote" para sacar los partidos de la liga
-ID_EQUIPO_OBJETIVO = settings.FBPA_ID_EQUIPO_PROPIO
+# LIMPIEZA DE LA VARIABLE RAÍZ
+ID_EQUIPO_OBJETIVO = str(settings.FBPA_ID_EQUIPO_PROPIO).replace('"', '').replace("'", "").strip()
 
 def main():
-    print("🔍 DIAGNÓSTICO DE CLAVES:")
-    print(f"   - URL Base: {'OK' if settings.FBPA_BASE_URL else '❌ VACÍA'}")
-    print(f"   - Dispositivo: {'OK' if settings.FBPA_ID_DISPOSITIVO else '❌ VACÍA'}")
-    print(f"   - Fase: {'OK' if settings.FBPA_ID_FASE else '❌ VACÍA'}")
-    print(f"   - Grupo: {'OK' if settings.FBPA_ID_GRUPO else '❌ VACÍA'}")
-    print(f"   - Equipo Propio: {'OK' if settings.FBPA_ID_EQUIPO_PROPIO else '❌ VACÍA'}")
-    print("-" * 30)
-
-
     # 1. Conectar a BD
     db = SessionLocal()
     scraper = ScraperService(db)
     
     print("🚀 INICIANDO CRAWLER FBPA")
+    print(f"ℹ️  Equipo Objetivo Hash: {ID_EQUIPO_OBJETIVO[:10]}...") 
     print("------------------------------------------------")
 
-    # 2. Obtener lista de partidos (Usando el método del Equipo para asegurar IDs encriptados)
-    # Nota: scraper.get_calendar_from_team es un método nuevo que añadiremos al servicio
+    # 2. Obtener lista de partidos
     games_to_scrape = scraper.get_calendar_from_team(ID_EQUIPO_OBJETIVO)
     
     if not games_to_scrape:
@@ -41,24 +30,24 @@ def main():
         print(f"[{i+1}/{len(games_to_scrape)}] Procesando: {game['local']} vs {game['visitante']}...", end=" ")
         
         try:
-            # Llamamos a la lógica de extracción de estadísticas
-            # Pasamos el objeto 'game' que contiene el ID hash y los nombres
-            success = scraper.ingest_game_statistics(game)
+            # 1. ESTADÍSTICAS
+            stats_ok = scraper.ingest_game_statistics(game)
             
-            if success:
-                scraper.ingest_shot_chart(game['id'])
-                print("✅ Boxscore + ShotChart OK")
-        
+            if stats_ok:
+                # 2. TIROS (Solo si las stats fueron bien)
+                shots_ok = scraper.ingest_shot_chart(game['id'])
+                
+                if shots_ok:
+                    print("✅ TODO OK")
+                else:
+                    print("⚠️ Stats OK pero TIROS FALLARON")
             else:
-                print("⚠️ Sin datos/Error")
+                print("⚠️ Fallo en Boxscore")
             
-            # Pausa de cortesía
             time.sleep(1.0)
             
         except Exception as e:
-            print(f"❌ Error: {e}")
-
-        
+            print(f"❌ Error General: {e}")
 
     db.close()
     print("\n✨ PROCESO COMPLETADO ✨")

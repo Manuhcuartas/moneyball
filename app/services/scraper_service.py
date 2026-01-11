@@ -1,7 +1,6 @@
 import requests
 import json
 import time
-import random
 import urllib3
 from sqlalchemy.orm import Session
 from app.models.stats import Game, PlayerStat
@@ -16,18 +15,31 @@ class ScraperService:
     def __init__(self, db: Session):
         self.db = db
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0",
             "Accept": "application/json",
             "Content-Type": "application/x-www-form-urlencoded"
         }
-        # Clave inicial (se actualizará sola)
+        # Clave inicial
         self.key = "MUTC0u_ZKdBCdgfYN8bHO29S5MUjmgVSinRpzVPOCzpgPzPZLR1U2jafvsOMJQnLjEQ2YRD7JOuqRwe79ySg0snIsF7vPDRkqMpG8ZIhzfcoICBJwZSRFCt8RdfxF21UvisZAlYBG-uHmrRQQb5uIt8kMG0Gg6n7lin4D9i_1OYA-3nPZGRmVdX5tW81p_-f"
-        self.base_url = settings.FBPA_BASE_URL
-        self.id_dispositivo = settings.FBPA_ID_DISPOSITIVO
-        self.id_fase = settings.FBPA_ID_FASE
-        self.id_grupo = settings.FBPA_ID_GRUPO
+        
+        # --- LIMPIEZA DE VARIABLES (CRÍTICO PARA GITHUB ACTIONS) ---
+        # Eliminamos comillas dobles, simples y espacios que se cuelan en los Secretos
+        def clean(val):
+            if not val: return ""
+            return str(val).replace('"', '').replace("'", "").strip()
+
+        self.base_url = clean(settings.FBPA_BASE_URL)
+        self.id_dispositivo = clean(settings.FBPA_ID_DISPOSITIVO)
+        self.id_fase = clean(settings.FBPA_ID_FASE)
+        self.id_grupo = clean(settings.FBPA_ID_GRUPO)
+        
+        # Imprimimos traza de seguridad (parcial)
+        print(f"🔧 Configuración cargada: Fase='{self.id_fase}', Grupo='{self.id_grupo}'")
 
     def get_calendar_from_team(self, id_equipo_hash):
+        # Limpieza extra del ID del equipo
+        id_equipo_hash = id_equipo_hash.replace('"', '').replace("'", "").strip()
+        
         url = f"{self.base_url}/equipo.ashx"        
         payload = {
             "accion": "horariosJornadas", 
@@ -37,22 +49,28 @@ class ScraperService:
             "id_fase": self.id_fase,
             "id_grupo": self.id_grupo,
             "fecha_inicial": "2025-09-01 00:00",
-            "fecha_final": "2025-10-01 23:59"
+            "fecha_final": "2026-06-30 23:59"
         }
         
         try:
-            print(f"🔄 Consultando calendario...")
+            print(f"🔄 Consultando calendario para equipo {id_equipo_hash[:5]}...")
+            # Probamos POST, si falla, GET (algunas versiones de la API cambian)
             r = requests.post(url, data=payload, headers=self.headers, verify=False)
+            
+            # Si el servidor dice Method Not Allowed o Not Found, probamos GET
+            if r.status_code >= 400:
+                 r = requests.get(url, params=payload, headers=self.headers, verify=False)
+
             data = r.json()
             
             if data.get("resultado") != "correcto":
-                 print(f"❌ Error API Calendario: {data.get('error')}")
+                 # Imprimir error completo para depurar
+                 print(f"❌ Error API Calendario: {data.get('error')} | Respuesta: {data}")
                  return []
             
-            # --- TRUCO: ACTUALIZAR LA CLAVE DINÁMICAMENTE ---
+            # Actualización de Key dinámica
             nueva_key = data.get("key")
             if nueva_key:
-                print(f"🔑 Clave API actualizada automáticamente.")
                 self.key = nueva_key
 
             lista_raw = data.get("partidos", [])
@@ -76,29 +94,23 @@ class ScraperService:
             return partidos_validos
 
         except Exception as e:
-            print(f"❌ Error en calendario: {e}")
+            print(f"❌ Error crítico en calendario: {e}")
             return []
 
     def ingest_game_statistics(self, game_metadata):
         game_hash = game_metadata["id"]
         url = "https://appaficionfbpa.indalweb.net/v2/envivo/estadisticas.ashx"
         
-        # CAMBIO CLAVE: Usamos POST en lugar de GET
         payload = {
             "id_dispositivo": self.id_dispositivo,
-            "key": self.key, # Usamos la key actualizada
+            "key": self.key,
             "id_partido": game_hash,
-            # Enviamos contexto por si acaso, aunque en el ejemplo original no estaba,
-            # pero en POST no hace daño.
             "id_fase": self.id_fase,
             "id_grupo": self.id_grupo
         }
 
         try:
-            # Petición POST
             r = requests.post(url, data=payload, headers=self.headers, verify=False, timeout=10)
-            
-            # Si POST falla con 405 Method Not Allowed, intentamos GET con la nueva key
             if r.status_code == 405:
                  r = requests.get(url, params=payload, headers=self.headers, verify=False, timeout=10)
 
@@ -108,7 +120,7 @@ class ScraperService:
                 print(f"   ⚠️ API Error (Stats): {data.get('error')}")
                 return False
 
-            # --- Lógica BD (Idéntica a antes) ---
+            # --- Lógica BD ---
             existing = self.db.query(Game).filter(Game.id == game_hash).first()
             if existing:
                 self.db.delete(existing)
@@ -178,10 +190,9 @@ class ScraperService:
             return False
         
     def ingest_shot_chart(self, game_id: str):
-        """
-        Extrae y guarda todos los eventos de tiro (coordenadas) de un partido.
-        Limpia los tiros anteriores de ese partido para evitar duplicados.
-        """
+        # Limpieza preventiva del ID
+        game_id = str(game_id).strip()
+        
         url = f"{self.base_url}/envivo/mapa-de-tiro.ashx"
         payload = {
             "id_dispositivo": self.id_dispositivo,
@@ -190,28 +201,33 @@ class ScraperService:
         }
 
         try:
+            # Plan A: POST
             r = requests.post(url, data=payload, headers=self.headers, verify=False, timeout=10)
-            data = r.json()
+            
+            # Plan B: GET (Si POST falla)
+            if r.status_code >= 400:
+                 time.sleep(0.5) 
+                 r = requests.get(url, params=payload, headers=self.headers, verify=False, timeout=10)
+
+            try:
+                data = r.json()
+            except json.JSONDecodeError:
+                print(f"   ⚠️ Error ShotChart: Respuesta no JSON (Status {r.status_code})")
+                return False
 
             if data.get("resultado") != "correcto":
-                print(f"   ⚠️ Error ShotChart: {data.get('error')}")
+                print(f"   ⚠️ Error API ShotChart: {data.get('error')}")
                 return False
 
             shots_raw = data.get("mapadetiro", {}).get("tiros", [])
             
-            # --- NUEVO: BORRADO PREVENTIVO ---
-            # Importamos el modelo aquí para evitar ciclos si fuera necesario, 
-            # o asegúrate de tenerlo arriba: from app.models.shot import Shot
             from app.models.shot import Shot
-            
-            # Borramos los tiros viejos de este partido antes de meter los nuevos
             self.db.query(Shot).filter(Shot.game_id == game_id).delete()
             self.db.commit()
             
             if not shots_raw:
-                return True # No hay tiros, pero ya limpiamos por si acaso
+                return True 
 
-            # Preparamos los datos para el repositorio
             shots_to_ingest = []
             for s in shots_raw:
                 shots_to_ingest.append(ShotIngest(
@@ -227,13 +243,13 @@ class ScraperService:
                     posicion_y=s["posicion_y"]
                 ))
 
-            # Guardamos en bloque
             shot_repo = ShotRepository(self.db)
             count = shot_repo.create_batch(game_id, shots_to_ingest)
-            print(f"   🎯 {count} eventos de tiro procesados (Limpieza previa OK).")
+            if count > 0:
+                print(f"   🎯 {count} tiros guardados.")
             return True
 
         except Exception as e:
-            self.db.rollback() # Importante hacer rollback si falla el borrado/insertado
-            print(f"❌ Error en ingesta de tiros: {e}")
+            self.db.rollback() 
+            print(f"❌ Excepción en ShotChart: {e}")
             return False
