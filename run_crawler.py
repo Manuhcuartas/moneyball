@@ -3,12 +3,22 @@ import time
 from app.core.database import SessionLocal
 from app.services.scraper_service import ScraperService
 from app.core.config import settings
+import sys
 
 # CONFIGURACIÓN
 # Usamos el ID de la Atlética Avilesina como "pivote" para sacar los partidos de la liga
 ID_EQUIPO_OBJETIVO = settings.FBPA_ID_EQUIPO_PROPIO
 
 def main():
+    print("🔍 DIAGNÓSTICO DE CLAVES:")
+    print(f"   - URL Base: {'OK' if settings.FBPA_BASE_URL else '❌ VACÍA'}")
+    print(f"   - Dispositivo: {'OK' if settings.FBPA_ID_DISPOSITIVO else '❌ VACÍA'}")
+    print(f"   - Fase: {'OK' if settings.FBPA_ID_FASE else '❌ VACÍA'}")
+    print(f"   - Grupo: {'OK' if settings.FBPA_ID_GRUPO else '❌ VACÍA'}")
+    print(f"   - Equipo Propio: {'OK' if settings.FBPA_ID_EQUIPO_PROPIO else '❌ VACÍA'}")
+    print("-" * 30)
+
+
     # 1. Conectar a BD
     db = SessionLocal()
     scraper = ScraperService(db)
