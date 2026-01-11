@@ -173,7 +173,7 @@ if jugador_sel:
         c_izq, c_der = st.columns([1, 1])
         with c_izq:
             st.plotly_chart(draw_radar_chart(stats), width="stretch")
-            st.info(f"**Rol:** {stats['Rol_Tactical']} | **Pos:** {stats['Posicion']} | **PJ:** {stats['PJ']}")
+            st.info(f"**Rol:** {stats['Rol_Tactical']} | **Posición:** {stats['Posicion']} | **Partidos jugados:** {stats['PJ']}")
         with c_der:
             if shots:
                 st.caption(f"Mapa de Tiros ({len(shots)} tiros)")
