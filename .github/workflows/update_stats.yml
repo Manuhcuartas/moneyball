@@ -25,7 +25,7 @@ jobs:
 
       - name: Run Crawler
         env:
-          # --- VARIABLES ANTIGUAS ---
+          # --- VARIABLES EXISTENTES ---
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           FBPA_BASE_URL: ${{ secrets.FBPA_BASE_URL }}
           FBPA_ID_DISPOSITIVO: ${{ secrets.FBPA_ID_DISPOSITIVO }}
@@ -33,7 +33,7 @@ jobs:
           FBPA_ID_GRUPO: ${{ secrets.FBPA_ID_GRUPO }}
           FBPA_ID_EQUIPO_PROPIO: ${{ secrets.FBPA_ID_EQUIPO_PROPIO }}
 
-          # --- VARIABLES NUEVAS (QUE FALTABAN) ---
+          # --- VARIABLES NUEVAS (ESTAS SON LAS QUE FALTAN) ---
           FBPA_DEVICE_UID: ${{ secrets.FBPA_DEVICE_UID }}
           FBPA_PUSH_TOKEN: ${{ secrets.FBPA_PUSH_TOKEN }}
           FBPA_LOGIN_URL: ${{ secrets.FBPA_LOGIN_URL }}
