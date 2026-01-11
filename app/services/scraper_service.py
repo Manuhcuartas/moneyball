@@ -111,6 +111,15 @@ class ScraperService:
                 print(f"❌ Error Calendario: No JSON. Status: {r.status_code}")
                 return []
             
+            print(f"🔍 DEBUG API CALENDARIO:")
+            print(f"   - IDs enviados: Fase='{self.id_fase[:5]}...', Grupo='{self.id_grupo[:5]}...', Equipo='{id_equipo_hash[:5]}...'")
+            lista_raw = data.get("partidos", [])
+            print(f"   - Partidos en bruto recibidos: {len(lista_raw)}")
+            if len(lista_raw) > 0:
+                print(f"   - Ejemplo estado partido 1: {lista_raw[0].get('Estado')} | Local: {lista_raw[0].get('Resultados', {}).get('ResultadoLocal')}")
+            else:
+                print(f"   - La API devolvió lista vacía. Revisa FASE y GRUPO.")
+            
             if data.get("resultado") != "correcto":
                  # Reintento de login si la key caducó
                  if "key" in str(data.get("error", "")).lower():
