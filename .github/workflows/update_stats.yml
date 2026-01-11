@@ -25,11 +25,18 @@ jobs:
 
       - name: Run Crawler
         env:
-          # Inyectamos los secretos configurados en GitHub
+          # --- VARIABLES ANTIGUAS ---
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           FBPA_BASE_URL: ${{ secrets.FBPA_BASE_URL }}
           FBPA_ID_DISPOSITIVO: ${{ secrets.FBPA_ID_DISPOSITIVO }}
           FBPA_ID_FASE: ${{ secrets.FBPA_ID_FASE }}
           FBPA_ID_GRUPO: ${{ secrets.FBPA_ID_GRUPO }}
           FBPA_ID_EQUIPO_PROPIO: ${{ secrets.FBPA_ID_EQUIPO_PROPIO }}
+
+          # --- VARIABLES NUEVAS (QUE FALTABAN) ---
+          FBPA_DEVICE_UID: ${{ secrets.FBPA_DEVICE_UID }}
+          FBPA_PUSH_TOKEN: ${{ secrets.FBPA_PUSH_TOKEN }}
+          FBPA_LOGIN_URL: ${{ secrets.FBPA_LOGIN_URL }}
+          FBPA_APP_VERSION: ${{ secrets.FBPA_APP_VERSION }}
+
         run: python run_crawler.py
