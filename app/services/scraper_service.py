@@ -2,6 +2,7 @@ import requests
 import json
 import time
 import urllib3
+from urllib.parse import urlencode
 from sqlalchemy.orm import Session
 from app.models.stats import Game, PlayerStat
 from app.core.config import settings
@@ -15,15 +16,12 @@ class ScraperService:
     def __init__(self, db: Session):
         self.db = db
         self.headers = {
-            "User-Agent": "Mozilla/5.0",
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
             "Accept": "application/json",
             "Content-Type": "application/x-www-form-urlencoded"
         }
-        # Clave inicial
-        self.key = "MUTC0u_ZKdBCdgfYN8bHO29S5MUjmgVSinRpzVPOCzpgPzPZLR1U2jafvsOMJQnLjEQ2YRD7JOuqRwe79ySg0snIsF7vPDRkqMpG8ZIhzfcoICBJwZSRFCt8RdfxF21UvisZAlYBG-uHmrRQQb5uIt8kMG0Gg6n7lin4D9i_1OYA-3nPZGRmVdX5tW81p_-f"
         
-        # --- LIMPIEZA DE VARIABLES (CRÍTICO PARA GITHUB ACTIONS) ---
-        # Eliminamos comillas dobles, simples y espacios que se cuelan en los Secretos
+        # Limpieza de variables
         def clean(val):
             if not val: return ""
             return str(val).replace('"', '').replace("'", "").strip()
@@ -33,45 +31,99 @@ class ScraperService:
         self.id_fase = clean(settings.FBPA_ID_FASE)
         self.id_grupo = clean(settings.FBPA_ID_GRUPO)
         
-        # Imprimimos traza de seguridad (parcial)
+        # Nuevas variables limpias
+        self.login_url = clean(settings.FBPA_LOGIN_URL)
+        self.device_uid = clean(settings.FBPA_DEVICE_UID)
+        self.push_token = clean(settings.FBPA_PUSH_TOKEN)
+        self.app_version = clean(settings.FBPA_APP_VERSION)
+        
+        self.key = "" 
+
         print(f"🔧 Configuración cargada: Fase='{self.id_fase}', Grupo='{self.id_grupo}'")
 
-    def get_calendar_from_team(self, id_equipo_hash):
-        # Limpieza extra del ID del equipo
-        id_equipo_hash = id_equipo_hash.replace('"', '').replace("'", "").strip()
-        
-        url = f"{self.base_url}/equipo.ashx"        
+    def login(self):
+        """
+        Login usando credenciales desde variables de entorno.
+        """
         payload = {
+            "accion": "acceso",
+            "uid": self.device_uid,          # <-- VARIABLE
+            "plataforma": "ios",
+            "tipo_dispositivo": "mobile",
+            "id_dispositivo": self.id_dispositivo, 
+            "token_push": self.push_token,   # <-- VARIABLE
+            "version": self.app_version      # <-- VARIABLE
+        }
+        
+        body_str = urlencode(payload)
+        
+        try:
+            print("🔑 Autenticando en Gesdeportiva...")
+            # Usamos la URL desde variable de entorno
+            r = requests.post(self.login_url, data=body_str, headers=self.headers, verify=False, timeout=15)
+            
+            try:
+                data = r.json()
+            except:
+                print(f"❌ Error Login: Respuesta no JSON (Status {r.status_code})")
+                return False
+
+            if data.get("resultado") == "correcto" and data.get("key"):
+                self.key = data.get("key")
+                print(f"✅ Login OK. Key recibida: {self.key[:10]}...")
+                return True
+            else:
+                print(f"❌ Login denegado: {data.get('error')}")
+                return False
+                
+        except Exception as e:
+            print(f"⚠️ Excepción en Login: {e}")
+            return False
+
+    def get_calendar_from_team(self, id_equipo_hash):
+        id_equipo_hash = str(id_equipo_hash).replace('"', '').replace("'", "").strip()
+        url = f"{self.base_url}/equipo.ashx"        
+        
+        payload_dict = {
             "accion": "horariosJornadas", 
             "id_equipo": id_equipo_hash,
             "id_dispositivo": self.id_dispositivo,
             "key": self.key,
             "id_fase": self.id_fase,
             "id_grupo": self.id_grupo,
+            "id_ronda": "",
             "fecha_inicial": "2025-09-01 00:00",
             "fecha_final": "2026-06-30 23:59"
         }
         
+        payload_str = urlencode(payload_dict)
+        
         try:
-            print(f"🔄 Consultando calendario para equipo {id_equipo_hash[:5]}...")
-            # Probamos POST, si falla, GET (algunas versiones de la API cambian)
-            r = requests.post(url, data=payload, headers=self.headers, verify=False)
+            print(f"🔄 Consultando calendario...")
+            r = requests.post(url, data=payload_str, headers=self.headers, verify=False, timeout=15)
             
-            # Si el servidor dice Method Not Allowed o Not Found, probamos GET
             if r.status_code >= 400:
-                 r = requests.get(url, params=payload, headers=self.headers, verify=False)
+                 r = requests.get(url, params=payload_dict, headers=self.headers, verify=False, timeout=15)
 
-            data = r.json()
+            try:
+                data = r.json()
+            except:
+                print(f"❌ Error Calendario: No JSON. Status: {r.status_code}")
+                return []
             
             if data.get("resultado") != "correcto":
-                 # Imprimir error completo para depurar
-                 print(f"❌ Error API Calendario: {data.get('error')} | Respuesta: {data}")
+                 # Reintento de login si la key caducó
+                 if "key" in str(data.get("error", "")).lower():
+                     print("   🔄 Key caducada, reintentando login...")
+                     if self.login():
+                         payload_dict["key"] = self.key
+                         payload_str = urlencode(payload_dict)
+                         return self.get_calendar_from_team(id_equipo_hash)
+                 
+                 print(f"❌ Error API Calendario: {data.get('error')}")
                  return []
             
-            # Actualización de Key dinámica
-            nueva_key = data.get("key")
-            if nueva_key:
-                self.key = nueva_key
+            if data.get("key"): self.key = data.get("key")
 
             lista_raw = data.get("partidos", [])
             partidos_validos = []
@@ -101,18 +153,19 @@ class ScraperService:
         game_hash = game_metadata["id"]
         url = "https://appaficionfbpa.indalweb.net/v2/envivo/estadisticas.ashx"
         
-        payload = {
+        payload_dict = {
             "id_dispositivo": self.id_dispositivo,
             "key": self.key,
             "id_partido": game_hash,
             "id_fase": self.id_fase,
             "id_grupo": self.id_grupo
         }
+        payload_str = urlencode(payload_dict)
 
         try:
-            r = requests.post(url, data=payload, headers=self.headers, verify=False, timeout=10)
-            if r.status_code == 405:
-                 r = requests.get(url, params=payload, headers=self.headers, verify=False, timeout=10)
+            r = requests.post(url, data=payload_str, headers=self.headers, verify=False, timeout=10)
+            if r.status_code >= 400:
+                 r = requests.get(url, params=payload_dict, headers=self.headers, verify=False, timeout=10)
 
             data = r.json()
 
@@ -120,7 +173,6 @@ class ScraperService:
                 print(f"   ⚠️ API Error (Stats): {data.get('error')}")
                 return False
 
-            # --- Lógica BD ---
             existing = self.db.query(Game).filter(Game.id == game_hash).first()
             if existing:
                 self.db.delete(existing)
@@ -146,7 +198,6 @@ class ScraperService:
             self.db.add(new_game)
             
             stats_root = data["estadisticas"]
-            
             for key_lista, key_nombre in [("estadisticasequipolocal", "equipolocal"), ("estadisticasequipovisitante", "equipovisitante")]:
                 nombre_equipo = stats_root.get(key_nombre)
                 jugadores = stats_root.get(key_lista, [])
@@ -186,33 +237,30 @@ class ScraperService:
 
         except Exception as e:
             self.db.rollback()
-            print(f"❌ Error guardando: {e}")
+            print(f"❌ Error guardando stats: {e}")
             return False
         
     def ingest_shot_chart(self, game_id: str):
-        # Limpieza preventiva del ID
         game_id = str(game_id).strip()
-        
         url = f"{self.base_url}/envivo/mapa-de-tiro.ashx"
-        payload = {
+        
+        payload_dict = {
             "id_dispositivo": self.id_dispositivo,
             "key": self.key,
             "id_partido": game_id
         }
+        payload_str = urlencode(payload_dict)
 
         try:
-            # Plan A: POST
-            r = requests.post(url, data=payload, headers=self.headers, verify=False, timeout=10)
-            
-            # Plan B: GET (Si POST falla)
+            r = requests.post(url, data=payload_str, headers=self.headers, verify=False, timeout=10)
             if r.status_code >= 400:
-                 time.sleep(0.5) 
-                 r = requests.get(url, params=payload, headers=self.headers, verify=False, timeout=10)
+                 time.sleep(0.5)
+                 r = requests.get(url, params=payload_dict, headers=self.headers, verify=False, timeout=10)
 
             try:
                 data = r.json()
-            except json.JSONDecodeError:
-                print(f"   ⚠️ Error ShotChart: Respuesta no JSON (Status {r.status_code})")
+            except:
+                print(f"   ⚠️ Error ShotChart: Respuesta no JSON")
                 return False
 
             if data.get("resultado") != "correcto":

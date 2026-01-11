@@ -1,10 +1,9 @@
-# run_crawler.py
 import time
 from app.core.database import SessionLocal
 from app.services.scraper_service import ScraperService
 from app.core.config import settings
 
-# LIMPIEZA DE LA VARIABLE RAÍZ
+# Limpieza de la variable raíz por si acaso
 ID_EQUIPO_OBJETIVO = str(settings.FBPA_ID_EQUIPO_PROPIO).replace('"', '').replace("'", "").strip()
 
 def main():
@@ -15,6 +14,12 @@ def main():
     print("🚀 INICIANDO CRAWLER FBPA")
     print(f"ℹ️  Equipo Objetivo Hash: {ID_EQUIPO_OBJETIVO[:10]}...") 
     print("------------------------------------------------")
+
+    # --- PASO CRÍTICO: LOGIN ---
+    # Esto obtiene la key válida para poder consultar el calendario después
+    if not scraper.login():
+        print("🛑 Deteniendo: No se pudo iniciar sesión en la API.")
+        return
 
     # 2. Obtener lista de partidos
     games_to_scrape = scraper.get_calendar_from_team(ID_EQUIPO_OBJETIVO)
@@ -34,7 +39,7 @@ def main():
             stats_ok = scraper.ingest_game_statistics(game)
             
             if stats_ok:
-                # 2. TIROS (Solo si las stats fueron bien)
+                # 2. TIROS
                 shots_ok = scraper.ingest_shot_chart(game['id'])
                 
                 if shots_ok:
@@ -44,7 +49,7 @@ def main():
             else:
                 print("⚠️ Fallo en Boxscore")
             
-            time.sleep(1.0)
+            time.sleep(1.0) # Respetamos un poco el servidor
             
         except Exception as e:
             print(f"❌ Error General: {e}")
