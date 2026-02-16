@@ -22,5 +22,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copiamos todo el código del proyecto al contenedor
 COPY . .
 
-# Exponemos los puertos que usaremos (8000 para API, 8501 para Streamlit)
-EXPOSE 8000 8501
+# Exponemos el puerto (Render usa $PORT)
+EXPOSE 8000
+
+# Comando de arranque (Render inyecta $PORT automáticamente)
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

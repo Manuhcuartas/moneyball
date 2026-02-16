@@ -18,9 +18,10 @@ app = FastAPI(
 # Esto es vital para que tu futuro Frontend (React, Vue, etc.) pueda pedir datos
 # sin que el navegador bloquee la petición.
 origins = [
-    "http://localhost:3000",  # React / Next.js por defecto
-    "http://localhost:5173",  # Vite / Vue por defecto
-    "*"                       # Permitir todo (solo para desarrollo)
+    "http://localhost:3000",  # Next.js local
+    "http://localhost:5173",  # Vite local
+    "https://moneyball-frontend-nine.vercel.app",  # Vercel production
+    "*"                       # Permitir todo (fallback)
 ]
 
 app.add_middleware(
