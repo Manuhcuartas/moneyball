@@ -21,7 +21,6 @@ class ScraperService:
             "Content-Type": "application/x-www-form-urlencoded"
         }
         
-        # Limpieza de variables
         def clean(val):
             if not val: return ""
             return str(val).replace('"', '').replace("'", "").strip()
@@ -31,7 +30,6 @@ class ScraperService:
         self.id_fase = clean(settings.FBPA_ID_FASE)
         self.id_grupo = clean(settings.FBPA_ID_GRUPO)
         
-        # Nuevas variables limpias
         self.login_url = clean(settings.FBPA_LOGIN_URL)
         self.device_uid = clean(settings.FBPA_DEVICE_UID)
         self.push_token = clean(settings.FBPA_PUSH_TOKEN)
@@ -41,27 +39,53 @@ class ScraperService:
 
         print(f"🔧 Configuración cargada: Fase='{self.id_fase}', Grupo='{self.id_grupo}'")
 
+    # --- MÉTODOS PRIVADOS PARA GESTIÓN DE ENTIDADES ---
+    def _get_or_create_team(self, raw_name: str):
+        from app.models.stats import Team
+        from app.core.normalization import normalize_team_name
+        
+        clean_name = normalize_team_name(raw_name)
+        
+        team = self.db.query(Team).filter(Team.name == clean_name).first()
+        if not team:
+            team = Team(name=clean_name)
+            self.db.add(team)
+            self.db.commit()
+            self.db.refresh(team)
+        return team
+
+    def _get_or_create_player(self, raw_name: str, team_id: int):
+        from app.models.stats import Player
+        
+        clean_name = " ".join(raw_name.split()).title()
+        
+        player = self.db.query(Player).filter(
+            Player.name == clean_name, 
+            Player.team_id == team_id
+        ).first()
+        
+        if not player:
+            player = Player(name=clean_name, team_id=team_id)
+            self.db.add(player)
+            self.db.commit()
+            self.db.refresh(player)
+        return player
+
     def login(self):
-        """
-        Login usando credenciales desde variables de entorno.
-        """
         payload = {
             "accion": "acceso",
-            "uid": self.device_uid,          # <-- VARIABLE
+            "uid": self.device_uid,
             "plataforma": "ios",
             "tipo_dispositivo": "mobile",
             "id_dispositivo": self.id_dispositivo, 
-            "token_push": self.push_token,   # <-- VARIABLE
-            "version": self.app_version      # <-- VARIABLE
+            "token_push": self.push_token,
+            "version": self.app_version
         }
-        
         body_str = urlencode(payload)
         
         try:
             print("🔑 Autenticando en Gesdeportiva...")
-            # Usamos la URL desde variable de entorno
             r = requests.post(self.login_url, data=body_str, headers=self.headers, verify=False, timeout=15)
-            
             try:
                 data = r.json()
             except:
@@ -75,7 +99,6 @@ class ScraperService:
             else:
                 print(f"❌ Login denegado: {data.get('error')}")
                 return False
-                
         except Exception as e:
             print(f"⚠️ Excepción en Login: {e}")
             return False
@@ -95,13 +118,11 @@ class ScraperService:
             "fecha_inicial": "2025-09-01 00:00",
             "fecha_final": "2026-06-30 23:59"
         }
-        
         payload_str = urlencode(payload_dict)
         
         try:
             print(f"🔄 Consultando calendario...")
             r = requests.post(url, data=payload_str, headers=self.headers, verify=False, timeout=15)
-            
             if r.status_code >= 400:
                  r = requests.get(url, params=payload_dict, headers=self.headers, verify=False, timeout=15)
 
@@ -111,24 +132,13 @@ class ScraperService:
                 print(f"❌ Error Calendario: No JSON. Status: {r.status_code}")
                 return []
             
-            print(f"🔍 DEBUG API CALENDARIO:")
-            print(f"   - IDs enviados: Fase='{self.id_fase[:5]}...', Grupo='{self.id_grupo[:5]}...', Equipo='{id_equipo_hash[:5]}...'")
-            lista_raw = data.get("partidos", [])
-            print(f"   - Partidos en bruto recibidos: {len(lista_raw)}")
-            if len(lista_raw) > 0:
-                print(f"   - Ejemplo estado partido 1: {lista_raw[0].get('Estado')} | Local: {lista_raw[0].get('Resultados', {}).get('ResultadoLocal')}")
-            else:
-                print(f"   - La API devolvió lista vacía. Revisa FASE y GRUPO.")
-            
             if data.get("resultado") != "correcto":
-                 # Reintento de login si la key caducó
                  if "key" in str(data.get("error", "")).lower():
                      print("   🔄 Key caducada, reintentando login...")
                      if self.login():
                          payload_dict["key"] = self.key
                          payload_str = urlencode(payload_dict)
                          return self.get_calendar_from_team(id_equipo_hash)
-                 
                  print(f"❌ Error API Calendario: {data.get('error')}")
                  return []
             
@@ -172,6 +182,7 @@ class ScraperService:
         payload_str = urlencode(payload_dict)
 
         try:
+            # 1. Petición a la API (ESTO ES LO QUE FALTABA)
             r = requests.post(url, data=payload_str, headers=self.headers, verify=False, timeout=10)
             if r.status_code >= 400:
                  r = requests.get(url, params=payload_dict, headers=self.headers, verify=False, timeout=10)
@@ -182,24 +193,29 @@ class ScraperService:
                 print(f"   ⚠️ API Error (Stats): {data.get('error')}")
                 return False
 
+            # 2. Gestión Relacional
+            from app.models.stats import Game, PlayerStat
+            
+            info = data["partido"]
+            home_team = self._get_or_create_team(info["local"])
+            visitor_team = self._get_or_create_team(info["visitante"])
+
             existing = self.db.query(Game).filter(Game.id == game_hash).first()
             if existing:
                 self.db.delete(existing)
                 self.db.commit()
 
-            info = data["partido"]
             try:
                 pl = int(info.get("tanteo_local", 0))
                 pv = int(info.get("tanteo_visitante", 0))
-            except:
-                pl, pv = 0, 0
+            except: pl, pv = 0, 0
 
             new_game = Game(
                 id=game_hash,
                 jornada=str(game_metadata["jornada"]),
                 fecha=game_metadata["fecha"],
-                equipo_local=info["local"],
-                equipo_visitante=info["visitante"],
+                home_team_id=home_team.id,
+                visitor_team_id=visitor_team.id,
                 puntos_local=pl,
                 puntos_visitante=pv,
                 estado=info["estado_partido"]
@@ -207,17 +223,23 @@ class ScraperService:
             self.db.add(new_game)
             
             stats_root = data["estadisticas"]
-            for key_lista, key_nombre in [("estadisticasequipolocal", "equipolocal"), ("estadisticasequipovisitante", "equipovisitante")]:
-                nombre_equipo = stats_root.get(key_nombre)
+            
+            team_mapping = [
+                ("estadisticasequipolocal", home_team), 
+                ("estadisticasequipovisitante", visitor_team)
+            ]
+
+            for key_lista, current_team in team_mapping:
                 jugadores = stats_root.get(key_lista, [])
 
                 for j in jugadores:
                     if j["nombre"] == "TOTALES": continue
                     
+                    player = self._get_or_create_player(j.get("nombre"), current_team.id)
+                    
                     p_stat = PlayerStat(
                         game_id=game_hash,
-                        equipo=nombre_equipo,
-                        nombre=j.get("nombre"),
+                        player_id=player.id,
                         dorsal=j.get("dorsal"),
                         es_titular=j.get("quintetotitular", False),
                         minutos=j.get("tiempo_jugado", "00:00"),

@@ -30,15 +30,12 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://postgres:admin@db:5432/moneyball
+      - DATABASE_URL=${DATABASE_URL}
       - FBPA_BASE_URL=https://appaficionfbpa.indalweb.net/v2
       - FBPA_ID_DISPOSITIVO=${FBPA_ID_DISPOSITIVO}
       - FBPA_ID_FASE=${FBPA_ID_FASE}
       - FBPA_ID_GRUPO=${FBPA_ID_GRUPO}
       - FBPA_ID_EQUIPO_PROPIO=${FBPA_ID_EQUIPO_PROPIO}
-    depends_on:
-      db:
-        condition: service_healthy
 
   # 3. FRONTEND (DASHBOARD)
   dashboard:

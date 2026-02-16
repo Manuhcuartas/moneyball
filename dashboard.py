@@ -35,11 +35,25 @@ def load_season_stats(min_games, min_minutes, team_filter=None):
 
 def load_player_profile_api(player_name):
     try:
+        # Petición a la API
         response = requests.get(f"{API_URL}/player/profile", params={"name": player_name})
-        if response.status_code == 200:
-            return response.json()
-        return None
-    except Exception:
+        
+        # 1. Verificar si la respuesta es exitosa
+        if response.status_code != 200:
+            st.error(f"❌ Error API: Status {response.status_code} - {response.text}")
+            return None
+            
+        data = response.json()
+
+        # 2. Adaptar a posible estructura anidada (común tras refactorizar)
+        # Si la API devuelve { "data": { "profile": ..., "shots": ... } }
+        if "data" in data and "profile" not in data:
+            data = data["data"]
+            
+        return data
+
+    except Exception as e:
+        st.error(f"❌ Error de conexión o formato: {e}")
         return None
 
 # --- FUNCIONES DE DIBUJO ---
@@ -166,18 +180,33 @@ jugadores = sorted(df['Jugador'].unique())
 jugador_sel = st.selectbox("Selecciona jugador:", jugadores)
 
 if jugador_sel:
-    profile_response = load_player_profile_api(jugador_sel)
-    if profile_response:
-        stats = profile_response['profile']
-        shots = profile_response['shots']
-        
-        c_izq, c_der = st.columns([1, 1])
-        with c_izq:
-            st.plotly_chart(draw_radar_chart(stats), width="stretch")
-            st.info(f"**Rol:** {stats['Rol_Tactical']} | **Posición:** {stats['Posicion']} | **Partidos jugados:** {stats['PJ']}")
-        with c_der:
-            if shots:
-                st.caption(f"Mapa de Tiros ({len(shots)} tiros)")
-                st.plotly_chart(draw_shot_chart(shots, title=""), width="stretch")
-            else:
-                st.warning("Sin datos de tiro.")
+    profile_data = load_player_profile_api(jugador_sel)
+    
+    if profile_data:
+        # Validación de claves antes de intentar leerlas
+        if 'profile' not in profile_data or 'shots' not in profile_data:
+            st.error(f"⚠️ Estructura JSON incorrecta. Claves recibidas: {list(profile_data.keys())}")
+        else:
+            stats = profile_data['profile']
+            shots = profile_data['shots']
+            
+            # --- DEBUG TEMPORAL (Eliminar tras verificar) ---
+            # st.write("Stats recibidas:", stats) 
+            # -----------------------------------------------
+
+            c_izq, c_der = st.columns([1, 1])
+            with c_izq:
+                # Verificar que stats no sea None antes de graficar
+                if stats:
+                    st.plotly_chart(draw_radar_chart(stats), width="stretch")
+                    st.info(f"**Rol:** {stats.get('Rol_Tactical', 'N/A')} | **Pos:** {stats.get('Posicion', 'N/A')}")
+                else:
+                    st.warning("El objeto 'profile' está vacío.")
+
+            with c_der:
+                if shots and len(shots) > 0:
+                    st.caption(f"Mapa de Tiros ({len(shots)} tiros)")
+                    st.plotly_chart(draw_shot_chart(shots, title=""), width="stretch")
+                else:
+                    # Esto confirma si el array llega vacío
+                    st.warning("⚠️ El jugador no tiene tiros registrados en la API.")
