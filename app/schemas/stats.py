@@ -17,9 +17,8 @@ class MoneyballPlayerSchema(BaseModel):
     eFG_pct: float  
     GmSc: float     
 
-    # --- CAMPOS NUEVOS IMPRESCINDIBLES ---
-    Posicion: str
-    Rol_Tactical: str  # Con guion bajo
+    # --- ROL ---
+    Rol_Tactical: str
     
     # Percentiles para el Radar
     P_USG: float
