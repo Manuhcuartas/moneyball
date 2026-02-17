@@ -6,7 +6,7 @@ from app.core.database import get_db
 from app.models.shot import Shot
 from app.schemas.shot import ShotResponse
 from app.repositories.analytics_repository import AnalyticsRepository
-from app.schemas.stats import GameStats, GameAdvancedStats, MoneyballResponse
+from app.schemas.stats import GameStats, GameAdvancedStats, MoneyballResponse, MoneyballPlayerSchema
 from app.models.stats import PlayerStat
 
 # IMPORTAMOS EL NUEVO SERVICIO DE PANDAS
@@ -37,8 +37,11 @@ def get_player_profile(
         
     if player_row.empty: 
         raise HTTPException(404, f"Jugador '{name}' no encontrado en las estadísticas procesadas.")
-        
-    profile_data = player_row.to_dict(orient="records")[0]
+    
+    # Filter to only schema fields (DataFrame has extra columns like Dorsal, ROf, etc.)
+    schema_fields = set(MoneyballPlayerSchema.model_fields.keys())
+    raw = player_row.to_dict(orient="records")[0]
+    profile_data = {k: v for k, v in raw.items() if k in schema_fields}
 
     # 3. Obtenemos Tiros (LOGICA SEGURA)
     # Buscamos en la tabla raw PlayerStat por el nombre exacto que viene del DF
