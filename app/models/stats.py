@@ -86,3 +86,21 @@ class PlayerStat(Base):
     # Relaciones
     game = relationship("Game", back_populates="stats")
     player = relationship("Player", back_populates="stats")
+
+# 5. EVOLUCION DEL MARCADOR (Game Flow)
+class GameFlow(Base):
+    __tablename__ = "game_flow"
+
+    id = Column(Integer, primary_key=True, index=True)
+    game_id = Column(String, ForeignKey("games.id"))
+    
+    minute = Column(String) # "Q1 08:30" or incrementing "1", "2"... 
+    sequence_order = Column(Integer) # To sort chronologically
+    puntos_local = Column(Integer)
+    puntos_visitante = Column(Integer)
+    diff = Column(Integer) # local - visitante
+
+    game = relationship("Game", back_populates="flow")
+
+# Add relationship to Game
+Game.flow = relationship("GameFlow", back_populates="game", cascade="all, delete-orphan")

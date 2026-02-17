@@ -35,7 +35,9 @@ app.add_middleware(
 # --- 2. REGISTRAR RUTAS ---
 # Aquí "enchufamos" el archivo de analítica al servidor principal.
 # El prefijo "/api/v1" significa que todas tus URLs empezarán por ahí.
+from app.api.v1.endpoints import games
 app.include_router(analytics.router, prefix="/api/v1", tags=["Analytics"])
+app.include_router(games.router, prefix="/api/v1/games", tags=["Games"])
 
 @app.get("/")
 def read_root():

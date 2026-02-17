@@ -2,15 +2,25 @@ import requests
 import json
 import time
 import urllib3
+import logging
 from urllib.parse import urlencode
-from sqlalchemy.orm import Session
-from app.models.stats import Game, PlayerStat
+from sqlalchemy.orm import Session, joinedload
 from app.core.config import settings
 from app.repositories.shot_repository import ShotRepository
 from app.schemas.shot import ShotIngest
+from app.models.stats import Game, PlayerStat, Player, GameFlow # Asegúrate de importar GameFlow
 
 # Desactivar advertencias SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 class ScraperService:
     def __init__(self, db: Session):
@@ -36,8 +46,94 @@ class ScraperService:
         self.app_version = clean(settings.FBPA_APP_VERSION)
         
         self.key = "" 
+        logger.info(f"🔧 Configuración cargada: Fase='{self.id_fase}', Grupo='{self.id_grupo}'")
 
-        print(f"🔧 Configuración cargada: Fase='{self.id_fase}', Grupo='{self.id_grupo}'")
+    def ingest_play_by_play(self, game_id: str):
+        game_id = str(game_id).strip()
+        url = "https://appaficionfbpa.indalweb.net/v2/envivo/partido.ashx"
+        
+        payload = {
+            "key": self.key,
+            "id_partido": game_id,
+            "id_dispositivo": self.id_dispositivo
+        }
+        
+        try:
+            r = requests.post(url, data=urlencode(payload), headers=self.headers, verify=False, timeout=15)
+            data = r.json()
+            
+            # --- 1. Obtener datos del partido de la BD para saber los IDs internos ---
+            game = self.db.query(Game).filter(Game.id == game_id).first()
+            if not game:
+                logger.error(f"❌ Partido {game_id} no encontrado en BD local.")
+                return False
+
+            # --- 2. Crear Mapa de Traducción (ID Interno -> ID API) ---
+            # Leemos los IDs oficiales del JSON
+            api_home_id = str(data["partido"].get("idlocal"))
+            api_visitor_id = str(data["partido"].get("idvisitante"))
+            
+            # Creamos el diccionario traductor
+            # Ejemplo: { "1": "855360", "2": "855739" }
+            id_map = {
+                str(game.home_team_id): api_home_id,
+                str(game.visitor_team_id): api_visitor_id
+            }
+            
+            # --- 3. Preparar Mapa de Stats de la API ---
+            envivo = data.get("envivo", {})
+            players_data = envivo.get("jugadoresenpistalocal", []) + envivo.get("jugadoresenpistavisitante", [])
+            
+            if not players_data:
+                logger.warning(f"⚠️ API devuelve lista de jugadores vacía para partido {game_id}")
+                return False
+
+            # Mapa: "ID_FEDERACION_DORSAL" -> Valor +/-
+            pm_map = {}
+            for p in players_data:
+                tid = str(p.get("idequipo"))
+                dorsal = str(p.get("dorsal"))
+                pm = p.get("masMenos")
+                if pm is not None:
+                    pm_map[f"{tid}_{dorsal}"] = int(pm)
+
+            # --- 4. Actualizar Base de Datos ---
+            stats = (
+                self.db.query(PlayerStat)
+                .options(joinedload(PlayerStat.player)) # Cargar relación para leer team_id
+                .filter(PlayerStat.game_id == game_id)
+                .all()
+            )
+            
+            count_updates = 0
+            
+            for s in stats:
+                if not s.player: continue
+                
+                # A. Obtenemos ID interno del equipo (ej: 1)
+                internal_tid = str(s.player.team_id)
+                
+                # B. Lo traducimos al ID de federación (ej: 1 -> 855360)
+                external_tid = id_map.get(internal_tid)
+                
+                if not external_tid:
+                    continue # Seguridad por si hay datos inconsistentes
+
+                # C. Generamos la clave correcta para buscar en el mapa de la API
+                key = f"{external_tid}_{s.dorsal}"
+                
+                if key in pm_map:
+                    s.mas_menos = pm_map[key]
+                    count_updates += 1
+            
+            self.db.commit()
+            logger.info(f"   📊 +/- Actualizado: {count_updates} jugadores (Traducción: {id_map})")
+            return True
+
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"❌ Error procesando Envivo {game_id}: {e}")
+            return False
 
     # --- MÉTODOS PRIVADOS PARA GESTIÓN DE ENTIDADES ---
     def _get_or_create_team(self, raw_name: str):
@@ -84,23 +180,23 @@ class ScraperService:
         body_str = urlencode(payload)
         
         try:
-            print("🔑 Autenticando en Gesdeportiva...")
+            logger.info("🔑 Autenticando en Gesdeportiva...")
             r = requests.post(self.login_url, data=body_str, headers=self.headers, verify=False, timeout=15)
             try:
                 data = r.json()
             except:
-                print(f"❌ Error Login: Respuesta no JSON (Status {r.status_code})")
+                logger.error(f"❌ Error Login: Respuesta no JSON (Status {r.status_code})")
                 return False
 
             if data.get("resultado") == "correcto" and data.get("key"):
                 self.key = data.get("key")
-                print(f"✅ Login OK. Key recibida: {self.key[:10]}...")
+                logger.info(f"✅ Login OK. Key recibida: {self.key[:10]}...")
                 return True
             else:
-                print(f"❌ Login denegado: {data.get('error')}")
+                logger.error(f"❌ Login denegado: {data.get('error')}")
                 return False
         except Exception as e:
-            print(f"⚠️ Excepción en Login: {e}")
+            logger.error(f"⚠️ Excepción en Login: {e}")
             return False
 
     def get_calendar_from_team(self, id_equipo_hash):
@@ -121,7 +217,7 @@ class ScraperService:
         payload_str = urlencode(payload_dict)
         
         try:
-            print(f"🔄 Consultando calendario...")
+            logger.info(f"🔄 Consultando calendario...")
             r = requests.post(url, data=payload_str, headers=self.headers, verify=False, timeout=15)
             if r.status_code >= 400:
                  r = requests.get(url, params=payload_dict, headers=self.headers, verify=False, timeout=15)
@@ -129,17 +225,17 @@ class ScraperService:
             try:
                 data = r.json()
             except:
-                print(f"❌ Error Calendario: No JSON. Status: {r.status_code}")
+                logger.error(f"❌ Error Calendario: No JSON. Status: {r.status_code}")
                 return []
             
             if data.get("resultado") != "correcto":
                  if "key" in str(data.get("error", "")).lower():
-                     print("   🔄 Key caducada, reintentando login...")
+                     logger.info("   🔄 Key caducada, reintentando login...")
                      if self.login():
                          payload_dict["key"] = self.key
                          payload_str = urlencode(payload_dict)
                          return self.get_calendar_from_team(id_equipo_hash)
-                 print(f"❌ Error API Calendario: {data.get('error')}")
+                 logger.error(f"❌ Error API Calendario: {data.get('error')}")
                  return []
             
             if data.get("key"): self.key = data.get("key")
@@ -161,11 +257,11 @@ class ScraperService:
                         "jornada": p.get("NumeroJornada")
                     })
             
-            print(f"✅ Partidos listos: {len(partidos_validos)}")
+            logger.info(f"✅ Partidos listos: {len(partidos_validos)}")
             return partidos_validos
 
         except Exception as e:
-            print(f"❌ Error crítico en calendario: {e}")
+            logger.error(f"❌ Error crítico en calendario: {e}")
             return []
 
     def ingest_game_statistics(self, game_metadata):
@@ -190,7 +286,7 @@ class ScraperService:
             data = r.json()
 
             if data.get("resultado") != "correcto":
-                print(f"   ⚠️ API Error (Stats): {data.get('error')}")
+                logger.warning(f"   ⚠️ API Error (Stats): {data.get('error')}")
                 return False
 
             # 2. Gestión Relacional
@@ -268,7 +364,7 @@ class ScraperService:
 
         except Exception as e:
             self.db.rollback()
-            print(f"❌ Error guardando stats: {e}")
+            logger.error(f"❌ Error guardando stats: {e}")
             return False
         
     def ingest_shot_chart(self, game_id: str):
@@ -291,11 +387,11 @@ class ScraperService:
             try:
                 data = r.json()
             except:
-                print(f"   ⚠️ Error ShotChart: Respuesta no JSON")
+                logger.warning(f"   ⚠️ Error ShotChart: Respuesta no JSON")
                 return False
 
             if data.get("resultado") != "correcto":
-                print(f"   ⚠️ Error API ShotChart: {data.get('error')}")
+                logger.warning(f"   ⚠️ Error API ShotChart: {data.get('error')}")
                 return False
 
             shots_raw = data.get("mapadetiro", {}).get("tiros", [])
@@ -330,5 +426,5 @@ class ScraperService:
 
         except Exception as e:
             self.db.rollback() 
-            print(f"❌ Excepción en ShotChart: {e}")
+            logger.error(f"❌ Excepción en ShotChart: {e}")
             return False

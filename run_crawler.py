@@ -41,6 +41,8 @@ def main():
             if stats_ok:
                 # 2. TIROS
                 shots_ok = scraper.ingest_shot_chart(game['id'])
+
+                pbp_ok = scraper.ingest_play_by_play(game['id']) 
                 
                 if shots_ok:
                     print("✅ TODO OK")
