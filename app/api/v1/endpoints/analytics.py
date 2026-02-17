@@ -44,8 +44,14 @@ def get_player_profile(
     profile_data = {k: v for k, v in raw.items() if k in schema_fields}
 
     # 3. Obtenemos Tiros (LOGICA SEGURA)
-    # Buscamos en la tabla raw PlayerStat por el nombre exacto que viene del DF
-    stats_jugador = db.query(PlayerStat).filter(PlayerStat.nombre == profile_data['Jugador']).all()
+    # Buscamos PlayerStat rows via Player.name (PlayerStat has no 'nombre' column)
+    from app.models.stats import Player
+    stats_jugador = (
+        db.query(PlayerStat)
+        .join(Player, PlayerStat.player_id == Player.id)
+        .filter(Player.name == profile_data['Jugador'])
+        .all()
+    )
     
     # --- CORRECCIÓN CRÍTICA ---
     # Si no encontramos filas en PlayerStat, devolvemos el perfil sin tiros
