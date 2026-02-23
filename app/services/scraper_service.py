@@ -35,15 +35,15 @@ class ScraperService:
             if not val: return ""
             return str(val).replace('"', '').replace("'", "").strip()
 
-        self.base_url = clean(settings.FBPA_BASE_URL)
-        self.id_dispositivo = clean(settings.FBPA_ID_DISPOSITIVO)
-        self.id_fase = clean(settings.FBPA_ID_FASE)
-        self.id_grupo = clean(settings.FBPA_ID_GRUPO)
+        self.base_url = clean(settings.FEDERATION_BASE_URL)
+        self.id_dispositivo = clean(settings.FEDERATION_ID_DISPOSITIVO)
+        self.id_fase = clean(settings.FEDERATION_ID_FASE)
+        self.id_grupo = clean(settings.FEDERATION_ID_GRUPO)
         
-        self.login_url = clean(settings.FBPA_LOGIN_URL)
-        self.device_uid = clean(settings.FBPA_DEVICE_UID)
-        self.push_token = clean(settings.FBPA_PUSH_TOKEN)
-        self.app_version = clean(settings.FBPA_APP_VERSION)
+        self.login_url = clean(settings.FEDERATION_LOGIN_URL)
+        self.device_uid = clean(settings.FEDERATION_DEVICE_UID)
+        self.push_token = clean(settings.FEDERATION_PUSH_TOKEN)
+        self.app_version = clean(settings.FEDERATION_APP_VERSION)
         
         self.key = "" 
         logger.info(f"🔧 Configuración cargada: Fase='{self.id_fase}', Grupo='{self.id_grupo}'")
@@ -136,19 +136,33 @@ class ScraperService:
             return False
 
     # --- MÉTODOS PRIVADOS PARA GESTIÓN DE ENTIDADES ---
-    def _get_or_create_team(self, raw_name: str):
+    def _decode_hex_string(self, hex_str: str) -> str:
+        """Decodes '78003800...' to 'x86Dad...' (UTF-16LE)"""
+        if not hex_str: return ""
+        try:
+            return bytes.fromhex(hex_str).decode('utf-16-le')
+        except:
+            return ""
+
+    def _get_or_create_team(self, raw_name: str, escudo_hex: str = None):
         from app.models.stats import Team
         from app.core.normalization import normalize_team_name
-        
+
         clean_name = normalize_team_name(raw_name)
-        
         team = self.db.query(Team).filter(Team.name == clean_name).first()
+
         if not team:
-            team = Team(name=clean_name)
+            team = Team(name=clean_name, logo_url=escudo_hex or None)
             self.db.add(team)
             self.db.commit()
             self.db.refresh(team)
+        elif escudo_hex and team.logo_url != escudo_hex:
+            team.logo_url = escudo_hex
+            self.db.commit()
+            self.db.refresh(team)
+
         return team
+
 
     def _get_or_create_player(self, raw_name: str, team_id: int):
         from app.models.stats import Player
@@ -245,17 +259,23 @@ class ScraperService:
             
             for p in lista_raw:
                 estado = p.get("Estado", "")
-                res = p.get("Resultados", {})
-                pts_local = str(res.get("ResultadoLocal", ""))
-                
-                if estado == "Terminado" and pts_local and pts_local != "-" and pts_local != "0":
-                    partidos_validos.append({
-                        "id": p.get("IdPartido"),
-                        "local": p.get("NombreEquipoLocal"),
-                        "visitante": p.get("NombreEquipoVisitante"),
-                        "fecha": p.get("Fecha"),
-                        "jornada": p.get("NumeroJornada")
-                    })
+                # Ahora aceptamos TODOS los partidos, no solo terminados
+                # Extraemos nuevos campos
+                partidos_validos.append({
+                    "id": p.get("IdPartido"),
+                    "local": p.get("NombreEquipoLocal"),
+                    "visitante": p.get("NombreEquipoVisitante"),
+                    "img_local": p.get("ImgEquipoLocal"),
+                    "img_visitante": p.get("ImgEquipoVisitante"),
+                    "fecha": p.get("Fecha"),
+                    "jornada": p.get("NumeroJornada"),
+                    "estado": p.get("Estado"), # Pass raw status
+                    # New fields
+                    "hora": p.get("Hora", "00:00"),
+                    "campo": p.get("CampoJuego", ""),
+                    "direccion": p.get("DireccionCampo", ""),
+                    "video": p.get("UrlOTT", "")
+                })
             
             logger.info(f"✅ Partidos listos: {len(partidos_validos)}")
             return partidos_validos
@@ -264,21 +284,113 @@ class ScraperService:
             logger.error(f"❌ Error crítico en calendario: {e}")
             return []
 
-    def ingest_game_statistics(self, game_metadata):
+    def should_scrape(self, game_id: str, source_status: str, force: bool = False) -> bool:
+        """
+        Determine whether a game needs to be scraped.
+        Returns True if stats should be downloaded, False to skip.
+        """
+        if force:
+            return source_status == "Terminado"
+
+        game = self.db.query(Game).filter(Game.id == game_id).first()
+
+        # New game — always scrape
+        if not game:
+            return True
+
+        # Source says finished but DB doesn't — scrape
+        if game.estado != "Terminado" and source_status == "Terminado":
+            return True
+
+        # Game is "Terminado" in DB but has incomplete data (no stats or 0-0 score)
+        if game.estado == "Terminado":
+            stat_count = self.db.query(PlayerStat).filter(PlayerStat.game_id == game_id).count()
+            if stat_count == 0:
+                logger.info(f"   🔄 Re-scraping: marked Terminado but has 0 stats")
+                return True
+            if game.puntos_local == 0 and game.puntos_visitante == 0:
+                logger.info(f"   🔄 Re-scraping: marked Terminado but score is 0-0")
+                return True
+
+        return False
+
+
+    def upsert_game_metadata(self, game_metadata):
         game_hash = game_metadata["id"]
+        try:
+            from app.models.stats import Game
+            
+            # 1. Resolve Teams with Logos
+            home_team = self._get_or_create_team(
+                game_metadata["local"], 
+                game_metadata.get("img_local")
+            )
+            visitor_team = self._get_or_create_team(
+                game_metadata["visitante"],
+                game_metadata.get("img_visitante")
+            )
+            
+            # Determine status from metadata or default
+            raw_status = game_metadata.get("estado")
+            status_to_save = raw_status if raw_status else "Pendiente"
+
+            # 2. Update or Create Game
+            existing = self.db.query(Game).filter(Game.id == game_hash).first()
+            if existing: # Update
+                existing.jornada = str(game_metadata.get("jornada"))
+                existing.fecha = game_metadata.get("fecha")
+                existing.time = game_metadata.get("hora")
+                existing.venue = game_metadata.get("campo")
+                existing.address = game_metadata.get("direccion")
+                existing.video_url = game_metadata.get("video")
+                
+                # Update Teams (Fix for DESCONOCIDO)
+                existing.home_team_id = home_team.id
+                existing.visitor_team_id = visitor_team.id
+
+                # Always update status if not finished
+                if existing.estado != "Terminado":
+                     existing.estado = status_to_save
+            else: # Create
+                new_game = Game(
+                    id=game_hash,
+                    jornada=str(game_metadata.get("jornada")),
+                    fecha=game_metadata.get("fecha"),
+                    home_team_id=home_team.id,
+                    visitor_team_id=visitor_team.id,
+                    puntos_local=0,
+                    puntos_visitante=0,
+                    estado=status_to_save, 
+                    time=game_metadata.get("hora"),
+                    venue=game_metadata.get("campo"),
+                    address=game_metadata.get("direccion"),
+                    video_url=game_metadata.get("video")
+                )
+                self.db.add(new_game)
+                # We need to commit here to ensure game exists for FKs if we proceed
+            self.db.commit() 
+            return True
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"❌ Error saving Game metadata {game_hash}: {e}")
+            return False
+
+    def fetch_game_stats(self, game_id: str):
         url = "https://appaficionfbpa.indalweb.net/v2/envivo/estadisticas.ashx"
         
         payload_dict = {
             "id_dispositivo": self.id_dispositivo,
             "key": self.key,
-            "id_partido": game_hash,
+            "id_partido": game_id,
             "id_fase": self.id_fase,
             "id_grupo": self.id_grupo
         }
         payload_str = urlencode(payload_dict)
 
         try:
-            # 1. Petición a la API (ESTO ES LO QUE FALTABA)
+            from app.models.stats import Game, PlayerStat
+
+            # 1. Petición a la API
             r = requests.post(url, data=payload_str, headers=self.headers, verify=False, timeout=10)
             if r.status_code >= 400:
                  r = requests.get(url, params=payload_dict, headers=self.headers, verify=False, timeout=10)
@@ -286,55 +398,50 @@ class ScraperService:
             data = r.json()
 
             if data.get("resultado") != "correcto":
-                logger.warning(f"   ⚠️ API Error (Stats): {data.get('error')}")
+                # Likely pending game or error
+                logger.warning(f"   ⚠️ API (Stats) unavailable for {game_id}: {data.get('error')}. ")
                 return False
 
-            # 2. Gestión Relacional
-            from app.models.stats import Game, PlayerStat
-            
+            # If correct, update stats
             info = data["partido"]
-            home_team = self._get_or_create_team(info["local"])
-            visitor_team = self._get_or_create_team(info["visitante"])
+            
+            # Load Game to get Teams
+            game = self.db.query(Game).filter(Game.id == game_id).first()
+            if not game:
+                logger.error(f"❌ Game {game_id} not found in DB during stats fetch")
+                return False
 
-            existing = self.db.query(Game).filter(Game.id == game_hash).first()
-            if existing:
-                self.db.delete(existing)
-                self.db.commit()
-
+            # Update scores if we have them
             try:
-                pl = int(info.get("tanteo_local", 0))
-                pv = int(info.get("tanteo_visitante", 0))
-            except: pl, pv = 0, 0
-
-            new_game = Game(
-                id=game_hash,
-                jornada=str(game_metadata["jornada"]),
-                fecha=game_metadata["fecha"],
-                home_team_id=home_team.id,
-                visitor_team_id=visitor_team.id,
-                puntos_local=pl,
-                puntos_visitante=pv,
-                estado=info["estado_partido"]
-            )
-            self.db.add(new_game)
+                game.puntos_local = int(info.get("tanteo_local", 0))
+                game.puntos_visitante = int(info.get("tanteo_visitante", 0))
+                game.estado = info.get("estado_partido", "Terminado")
+            except: pass
+            
+            # Clear old stats
+            self.db.query(PlayerStat).filter(PlayerStat.game_id == game_id).delete()
             
             stats_root = data["estadisticas"]
             
+            # We need to associate players with teams
+            # We assume "estadisticasequipolocal" corresponds to game.home_team_id
+            # But wait, we need the Team OBJECTS or IDs
+            
             team_mapping = [
-                ("estadisticasequipolocal", home_team), 
-                ("estadisticasequipovisitante", visitor_team)
+                ("estadisticasequipolocal", game.home_team_id), 
+                ("estadisticasequipovisitante", game.visitor_team_id)
             ]
 
-            for key_lista, current_team in team_mapping:
+            for key_lista, team_id in team_mapping:
                 jugadores = stats_root.get(key_lista, [])
 
                 for j in jugadores:
                     if j["nombre"] == "TOTALES": continue
                     
-                    player = self._get_or_create_player(j.get("nombre"), current_team.id)
+                    player = self._get_or_create_player(j.get("nombre"), team_id)
                     
                     p_stat = PlayerStat(
-                        game_id=game_hash,
+                        game_id=game_id,
                         player_id=player.id,
                         dorsal=j.get("dorsal"),
                         es_titular=j.get("quintetotitular", False),
@@ -427,4 +534,100 @@ class ScraperService:
         except Exception as e:
             self.db.rollback() 
             logger.error(f"❌ Excepción en ShotChart: {e}")
+            return False
+
+    def ingest_standings(self):
+        """
+        Descarga la clasificación actual y la guarda en BD.
+        """
+        url = f"{self.base_url}/equipo.ashx"
+        
+        # Usamos el payload descrito por el usuario
+        payload_dict = {
+            "accion": "clasificacion",
+            "id_dispositivo": self.id_dispositivo,
+            "key": self.key,
+            "id_grupo": self.id_grupo,
+            "tipo_fase": "LIGA" # Parametro hardcoded según request del usuario
+        }
+        
+        # Opcional: Si la API requiere id_fase también, lo añadimos.
+        # En el ejemplo del usuario no estaba, pero en otros calls sí. 
+        # Lo dejaremos tal cual el ejemplo del usuario primero.
+        
+        payload_str = urlencode(payload_dict)
+
+        try:
+            logger.info("🏆 Consultando Clasificación...")
+            r = requests.post(url, data=payload_str, headers=self.headers, verify=False, timeout=15)
+            
+            # Retry logic simple
+            if r.status_code >= 400:
+                 r = requests.get(url, params=payload_dict, headers=self.headers, verify=False, timeout=15)
+
+            try:
+                data = r.json()
+            except:
+                logger.error(f"❌ Error Clasificación: No JSON. Status {r.status_code}")
+                return False
+
+            if data.get("resultado") != "correcto":
+                if "key" in str(data.get("error", "")).lower():
+                     logger.info("   🔄 Key caducada en Clasificación, reintentando login...")
+                     if self.login():
+                         payload_dict["key"] = self.key
+                         payload_str = urlencode(payload_dict)
+                         # Recursive simple (cuidado con infinite loops, pero login maneja timeouts)
+                         # Mejor hacemos una llamada directa
+                         r = requests.post(url, data=payload_str, headers=self.headers, verify=False, timeout=15)
+                         data = r.json()
+                     else:
+                         return False
+                
+                if data.get("resultado") != "correcto":
+                    logger.error(f"❌ Error API Clasificación: {data.get('error')}")
+                    return False
+
+            # Procesar datos
+            clasificacion = data.get("clasificacion", [])
+            if not clasificacion:
+                logger.warning("⚠️ Clasificación vacía recibida.")
+                return True
+
+            from app.models.stats import TeamStanding, Team
+            
+            # Limpiamos la clasificación actual para este grupo/temporada? 
+            # O hacemos upsert? Upsert por Equipo es mejor.
+            
+            count = 0
+            for item in clasificacion:
+                team_name = item.get("NombreEquipo")
+                escudo_hex = item.get("Escudo")
+                team = self._get_or_create_team(team_name, escudo_hex)
+                
+                # Buscamos si ya existe el standing para este equipo
+                standing = self.db.query(TeamStanding).filter(TeamStanding.team_id == team.id).first()
+                
+                if not standing:
+                    standing = TeamStanding(team_id=team.id)
+                    self.db.add(standing)
+                
+                # Actualizamos campos
+                standing.position = item.get("Posicion")
+                standing.season = item.get("Temporada")
+                standing.played = item.get("PartidosJugados")
+                standing.won = item.get("PartidosGanados")
+                standing.lost = item.get("PartidosPerdidos")
+                standing.points = item.get("Puntos")
+                standing.win_rate = item.get("CocienteVictorias")
+                
+                count += 1
+            
+            self.db.commit()
+            logger.info(f"✅ Clasificación actualizada: {count} equipos.")
+            return True
+
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"❌ Error crítico ingestando clasificación: {e}")
             return False

@@ -1,48 +1,52 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-
-# IMPORTANTE: Importa el router donde definimos los endpoints nuevos.
-# Si tu archivo se llama 'analytics.py' (como te sugerí) usa este import:
-from app.api.v1.endpoints import analytics
-
-# Si decidiste mantenerlo en 'stats.py', descomenta esta línea y comenta la de arriba:
-# from app.api.routes import stats as analytics 
+from fastapi.responses import JSONResponse
+from app.api.v1.endpoints import analytics, games, standings
+from app.core.config import settings
 
 app = FastAPI(
     title="FBPA Moneyball API",
     description="Backend de analítica avanzada para baloncesto amateur",
-    version="1.0.0"
+    version="1.0.0",
 )
 
-# --- 1. CONFIGURACIÓN DE CORS ---
-# Esto es vital para que tu futuro Frontend (React, Vue, etc.) pueda pedir datos
-# sin que el navegador bloquee la petición.
+
+@app.middleware("http")
+async def verify_api_key(request: Request, call_next):
+    """Require X-API-Key header on /api/ routes when API_KEY is configured."""
+    if settings.API_KEY and request.url.path.startswith("/api/"):
+        key = request.headers.get("X-API-Key")
+        if key != settings.API_KEY:
+            return JSONResponse(status_code=403, content={"detail": "Invalid API key"})
+    return await call_next(request)
+
+
+# CORS configuration
 origins = [
-    "http://localhost:3000",  # Next.js local
-    "http://localhost:5173",  # Vite local
-    "https://moneyball-frontend-nine.vercel.app",  # Vercel production
-    "*"                       # Permitir todo (fallback)
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "https://moneyball-frontend-nine.vercel.app",
+    "*",
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],  # Permitir GET, POST, PUT, DELETE...
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- 2. REGISTRAR RUTAS ---
-# Aquí "enchufamos" el archivo de analítica al servidor principal.
-# El prefijo "/api/v1" significa que todas tus URLs empezarán por ahí.
-from app.api.v1.endpoints import games
+# Route registration
 app.include_router(analytics.router, prefix="/api/v1", tags=["Analytics"])
 app.include_router(games.router, prefix="/api/v1/games", tags=["Games"])
+app.include_router(standings.router, prefix="/api/v1", tags=["Standings"])
+
 
 @app.get("/")
 def read_root():
     return {
         "status": "online",
         "project": "Moneyball FBPA",
-        "docs": "Go to /docs to see the API"
+        "docs": "Go to /docs to see the API",
     }

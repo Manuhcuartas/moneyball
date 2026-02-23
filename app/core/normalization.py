@@ -1,59 +1,29 @@
-# app/core/normalization.py
-
 def normalize_team_name(raw_name: str) -> str:
-    """
-    Recibe el nombre sucio de la Federación y devuelve el Nombre Canónico.
-    """
+    """Map federation team names to their canonical form."""
     if not raw_name:
         return "DESCONOCIDO"
 
     name = raw_name.upper().strip()
 
-    # --- REGLAS DE MAPEO ---
-    
-    # 1. PUMARÍN
-    if "PUMARIN" in name:
-        return "C.B. PUMARIN"
-    
-    # 2. CIRCULO GIJÓN
-    if "CIRCULO" in name or "CÍRCULO" in name:
-        return "CIRCULO GIJÓN"
-    
-    # 3. AVILÉS SUR
-    if "AVILES SUR" in name:
-        return "C.D.B. AVILES SUR"
-    
-    # 4. ART-CHIVO
-    if "ART-CHIVO" in name:
-        return "CD ART-CHIVO"
-    
-    # 5. OVIEDO BALONCESTO (OCB)
-    if "OVIEDO BALONCESTO" in name or "OVIEDO C.B." in name:
-        return "ALIMERKA OVIEDO"
-    
-    # 6. GRUPO COVADONGA
-    if "GRUPO DE CULTURA" in name:
-        return "RGCC"
-    
-    # 7. VILLA DE MIERES (BVM2012)
-    if "VILLA DE MIERES" in name or "BVM 2012" in name:
-        return "BVM 2012"
-    
-    # 8. CENTRO ASTURIANO
-    if "CENTRO ASTURIANO" in name:
-        return "CENTRO ASTURIANO"
-    
-    # 9. COSTA NORTE
-    if "COSTA NORTE" in name:
-        return "COSTA NORTE"
-    
-    # 10. ARGAÑOSA
-    if "ARGAÑOSA" in name:
-        return "C.B. LA ARGAÑOSA"
-    
-    # 11. GIJON BASKET
-    if "GIJON BASKET" in name:
-        return "GIJON BASKET"
+    TEAM_MAP = {
+        "PUMARIN": "C.B. PUMARIN",
+        "CIRCULO": "CIRCULO GIJÓN",
+        "CÍRCULO": "CIRCULO GIJÓN",
+        "AVILES SUR": "C.D.B. AVILES SUR",
+        "ART-CHIVO": "CD ART-CHIVO",
+        "OVIEDO BALONCESTO": "ALIMERKA OVIEDO",
+        "OVIEDO C.B.": "ALIMERKA OVIEDO",
+        "GRUPO DE CULTURA": "RGCC",
+        "VILLA DE MIERES": "BVM 2012",
+        "BVM 2012": "BVM 2012",
+        "CENTRO ASTURIANO": "CENTRO ASTURIANO",
+        "COSTA NORTE": "COSTA NORTE",
+        "ARGAÑOSA": "C.B. LA ARGAÑOSA",
+        "GIJON BASKET": "GIJON BASKET",
+    }
 
-    # Si no coincide con nada, devolvemos el original limpio
+    for pattern, canonical in TEAM_MAP.items():
+        if pattern in name:
+            return canonical
+
     return name

@@ -2,11 +2,11 @@ from app.core.database import engine, Base
 
 # Importar TODOS los modelos
 from app.models.shot import Shot 
-from app.models.stats import Game, PlayerStat, Team, Player # <--- Añadir Team y Player
+from app.models.stats import Game, PlayerStat, Team, Player, TeamStanding # <--- Añadir Team y Player y TeamStanding
 
 def init_db():
-    print("🔄 Reiniciando Base de Datos...")
-    Base.metadata.drop_all(bind=engine)
+    print("🔄 Actualizando Base de Datos...")
+    # Base.metadata.drop_all(bind=engine) # COMENTADO PARA NO BORRAR DATOS EXISTENTES
     print("✨ Creando esquema nuevo (Teams, Players, Games, Stats)...")
     Base.metadata.create_all(bind=engine)
     print("✅ BD lista.")

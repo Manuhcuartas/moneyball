@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime
+
 
 class PlayerBoxScore(BaseModel):
     player_id: int
@@ -14,10 +14,12 @@ class PlayerBoxScore(BaseModel):
     asistencias: int
     es_titular: bool
 
+
 class TeamBoxScore(BaseModel):
     team_id: int
     team_name: str
     players: List[PlayerBoxScore]
+
 
 class GameResponse(BaseModel):
     id: str
@@ -28,15 +30,23 @@ class GameResponse(BaseModel):
     visitor_team: Optional[str]
     puntos_local: Optional[int]
     puntos_visitante: Optional[int]
+    time: Optional[str] = None
+    venue: Optional[str] = None
+    address: Optional[str] = None
+    video_url: Optional[str] = None
+    home_team_logo: Optional[str] = None
+    visitor_team_logo: Optional[str] = None
 
     class Config:
         orm_mode = True
+
 
 class GameFlowPoint(BaseModel):
     minute: str
     diff: int
     puntos_local: int
     puntos_visitante: int
+
 
 class GameDetailResponse(GameResponse):
     home_boxscore: List[PlayerBoxScore]
