@@ -1,9 +1,15 @@
-# .dockerignore
-.env
 venv/
 .venv/
 __pycache__/
-*.pyc
+*.py[cod]
+.env
 .git/
 .gitignore
-docker-compose.yml
+*.md
+*.log
+*.xlsx
+*.csv
+*.db
+*.sqlite3
+.vscode/
+.idea/
