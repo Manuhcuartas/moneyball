@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from app.api.v1.endpoints import analytics, games, standings
+from app.api.v1.endpoints import analytics, games, standings, crawler
 from app.core.config import settings
 
 app = FastAPI(
@@ -41,6 +41,7 @@ app.add_middleware(
 app.include_router(analytics.router, prefix="/api/v1", tags=["Analytics"])
 app.include_router(games.router, prefix="/api/v1/games", tags=["Games"])
 app.include_router(standings.router, prefix="/api/v1", tags=["Standings"])
+app.include_router(crawler.router, prefix="/api/v1", tags=["Crawler"])
 
 
 @app.get("/")
