@@ -1,0 +1,16 @@
+name: Keep Alive
+
+on:
+  schedule:
+    # Every 14 minutes to prevent Render free tier cold starts
+    - cron: '*/14 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping backend
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.API_URL }}/../" --max-time 10 || echo "000")
+          echo "Ping response: $response"

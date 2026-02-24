@@ -25,8 +25,7 @@ async def verify_api_key(request: Request, call_next):
 origins = [
     "http://localhost:3000",
     "http://localhost:5173",
-    "https://moneyball-frontend-nine.vercel.app",
-    "*",
+    settings.FRONTEND_URL,
 ]
 
 app.add_middleware(

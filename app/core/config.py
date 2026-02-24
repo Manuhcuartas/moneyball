@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     FEDERATION_APP_VERSION: str
 
     API_KEY: str = ""
+    FRONTEND_URL: str = "https://moneyball-frontend-nine.vercel.app"
 
     class Config:
         env_file = ".env"
