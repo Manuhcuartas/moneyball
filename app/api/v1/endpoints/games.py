@@ -64,9 +64,13 @@ def get_game_detail(game_id: str, db: Session = Depends(get_db)):
 
     for s in stats:
         p = s.player
+        photo_url = None
+        if p.componente_id:
+            photo_url = f"https://appaficionfbpa.gesdeportiva.es/imagenes.ashx?tipo=jugadorclub&id={p.componente_id}"
         box = PlayerBoxScore(
             player_id=p.id,
             player_name=p.name,
+            photo_url=photo_url,
             dorsal=s.dorsal,
             minutos=s.minutos,
             puntos=s.puntos,

@@ -164,7 +164,7 @@ class ScraperService:
         return team
 
 
-    def _get_or_create_player(self, raw_name: str, team_id: int):
+    def _get_or_create_player(self, raw_name: str, team_id: int, componente_id: str = None):
         from app.models.stats import Player
         
         clean_name = " ".join(raw_name.split()).title()
@@ -175,8 +175,12 @@ class ScraperService:
         ).first()
         
         if not player:
-            player = Player(name=clean_name, team_id=team_id)
+            player = Player(name=clean_name, team_id=team_id, componente_id=componente_id or None)
             self.db.add(player)
+            self.db.commit()
+            self.db.refresh(player)
+        elif componente_id and player.componente_id != componente_id:
+            player.componente_id = componente_id
             self.db.commit()
             self.db.refresh(player)
         return player
@@ -438,7 +442,8 @@ class ScraperService:
                 for j in jugadores:
                     if j["nombre"] == "TOTALES": continue
                     
-                    player = self._get_or_create_player(j.get("nombre"), team_id)
+                    cid = j.get("componente_id") or None
+                    player = self._get_or_create_player(j.get("nombre"), team_id, componente_id=cid)
                     
                     p_stat = PlayerStat(
                         game_id=game_id,

@@ -5,6 +5,7 @@ from typing import List, Optional
 class PlayerBoxScore(BaseModel):
     player_id: int
     player_name: str
+    photo_url: Optional[str] = None
     dorsal: str
     minutos: str
     puntos: int

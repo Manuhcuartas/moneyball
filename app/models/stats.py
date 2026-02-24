@@ -21,6 +21,7 @@ class Player(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, index=True)
     team_id = Column(Integer, ForeignKey("teams.id"))
+    componente_id = Column(String, default=None)
 
     team = relationship("Team", back_populates="players")
     stats = relationship("PlayerStat", back_populates="player")
