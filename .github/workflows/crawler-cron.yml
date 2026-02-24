@@ -1,0 +1,33 @@
+name: Scheduled Crawler
+
+on:
+  schedule:
+    # Every Sunday at 23:00 UTC (after weekend games)
+    - cron: '0 23 * * 0'
+    # Every Monday at 09:00 UTC (catch any late updates)
+    - cron: '0 9 * * 1'
+  workflow_dispatch: # Allow manual trigger from GitHub UI
+
+jobs:
+  trigger-crawler:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger crawler
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "${{ secrets.API_URL }}/crawler/run" \
+            -H "X-API-Key: ${{ secrets.API_KEY }}")
+          echo "Response: $response"
+          if [ "$response" != "200" ]; then
+            echo "❌ Crawler trigger failed with status $response"
+            exit 1
+          fi
+          echo "✅ Crawler triggered successfully"
+
+      - name: Wait and check status
+        run: |
+          sleep 120
+          status=$(curl -s \
+            "${{ secrets.API_URL }}/crawler/status" \
+            -H "X-API-Key: ${{ secrets.API_KEY }}")
+          echo "Crawler status: $status"
