@@ -9,6 +9,7 @@ class Team(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True)
     logo_url = Column(String, default=None)
+    federation_hex = Column(String, default=None)
 
     players = relationship("Player", back_populates="team")
     home_games = relationship("Game", foreign_keys="[Game.home_team_id]", back_populates="home_team")
@@ -22,9 +23,14 @@ class Player(Base):
     name = Column(String, index=True)
     team_id = Column(Integer, ForeignKey("teams.id"))
     componente_id = Column(String, default=None)
+    federation_id = Column(String, default=None)
+    federation_componente_club_id = Column(String, default=None)
+    ppg = Column(Float, default=None)
+    mpg = Column(Float, default=None)
 
     team = relationship("Team", back_populates="players")
-    stats = relationship("PlayerStat", back_populates="player")
+    stats = relationship("PlayerStat", back_populates="player", cascade="all, delete-orphan")
+    season_stats = relationship("PlayerSeasonStat", back_populates="player", uselist=False, cascade="all, delete-orphan")
 
 
 class Game(Base):
@@ -121,3 +127,92 @@ class TeamStanding(Base):
 
 
 Team.standing = relationship("TeamStanding", back_populates="team", uselist=False, cascade="all, delete-orphan")
+
+
+class PlayerSeasonStat(Base):
+    __tablename__ = "player_season_stats"
+
+    id = Column(Integer, primary_key=True, index=True)
+    player_id = Column(Integer, ForeignKey("players.id"), unique=True, index=True)
+
+    minutes_avg = Column(Float, default=0.0)
+    points_avg = Column(Float, default=0.0)
+    valoracion_avg = Column(Float, default=0.0)
+    mas_menos_avg = Column(Float, default=0.0)
+    rebounds_avg = Column(Float, default=0.0)
+    assists_avg = Column(Float, default=0.0)
+    steals_avg = Column(Float, default=0.0)
+    turnovers_avg = Column(Float, default=0.0)
+    blocks_avg = Column(Float, default=0.0)
+    
+    id = Column(Integer, primary_key=True, index=True)
+    player_id = Column(Integer, ForeignKey("players.id"))
+    
+    # Absolute Season Stats
+    games_played = Column(Integer, default=0)
+    total_minutes = Column(String, default="00:00")
+    total_points = Column(Integer, default=0)
+    total_valoracion = Column(Integer, default=0)
+    total_rebounds = Column(Integer, default=0)
+    total_assists = Column(Integer, default=0)
+    total_steals = Column(Integer, default=0)
+    total_turnovers = Column(Integer, default=0)
+    total_blocks = Column(Integer, default=0)
+    
+    # Averages
+    minutes_avg = Column(Float, default=0.0)
+    points_avg = Column(Float, default=0.0)
+    valoracion_avg = Column(Float, default=0.0)
+    mas_menos_avg = Column(Float, default=0.0)
+    rebounds_avg = Column(Float, default=0.0)
+    assists_avg = Column(Float, default=0.0)
+    steals_avg = Column(Float, default=0.0)
+    turnovers_avg = Column(Float, default=0.0)
+    blocks_avg = Column(Float, default=0.0)
+    fouls_drawn_avg = Column(Float, default=0.0)
+    fouls_committed_avg = Column(Float, default=0.0)
+
+    # Percentiles (0-100 relative to league)
+    points_pctile = Column(Integer, default=0)
+    rebounds_pctile = Column(Integer, default=0)
+    assists_pctile = Column(Integer, default=0)
+    steals_pctile = Column(Integer, default=0)
+    blocks_pctile = Column(Integer, default=0)
+    valoracion_pctile = Column(Integer, default=0)
+    mas_menos_pctile = Column(Integer, default=0)
+
+    # Shooting (Player)
+    ft_pct = Column(Float, default=0.0)
+    two_pct = Column(Float, default=0.0)
+    three_pct = Column(Float, default=0.0)
+    fg_pct = Column(Float, default=0.0)
+
+    # Advanced Stats
+    ts_pct = Column(Float, default=0.0)
+    efg_pct = Column(Float, default=0.0)
+    usg_pct = Column(Float, default=0.0)
+
+    player = relationship("Player", back_populates="season_stats")
+
+
+class LeagueAverage(Base):
+    __tablename__ = "league_averages"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    minutes_avg = Column(Float, default=0.0)
+    points_avg = Column(Float, default=0.0)
+    valoracion_avg = Column(Float, default=0.0)
+    mas_menos_avg = Column(Float, default=0.0)
+    rebounds_avg = Column(Float, default=0.0)
+    assists_avg = Column(Float, default=0.0)
+    steals_avg = Column(Float, default=0.0)
+    turnovers_avg = Column(Float, default=0.0)
+    blocks_avg = Column(Float, default=0.0)
+    fouls_drawn_avg = Column(Float, default=0.0)
+    fouls_committed_avg = Column(Float, default=0.0)
+
+    ft_pct = Column(Float, default=0.0)
+    fg_pct = Column(Float, default=0.0)
+    two_pct = Column(Float, default=0.0)
+    three_pct = Column(Float, default=0.0)

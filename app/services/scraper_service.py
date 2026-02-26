@@ -169,6 +169,13 @@ class ScraperService:
         
         clean_name = " ".join(raw_name.split()).title()
         
+        # 1. Exact match by unique component ID (safest)
+        if componente_id:
+            player = self.db.query(Player).filter(Player.componente_id == componente_id).first()
+            if player:
+                return player
+
+        # 2. Fallback to name match
         player = self.db.query(Player).filter(
             Player.name == clean_name, 
             Player.team_id == team_id
@@ -609,6 +616,11 @@ class ScraperService:
                 team_name = item.get("NombreEquipo")
                 escudo_hex = item.get("Escudo")
                 team = self._get_or_create_team(team_name, escudo_hex)
+
+                # Save federation hex ID for roster sync
+                fed_hex = item.get("IdEquipo")
+                if fed_hex and not team.federation_hex:
+                    team.federation_hex = fed_hex
                 
                 # Buscamos si ya existe el standing para este equipo
                 standing = self.db.query(TeamStanding).filter(TeamStanding.team_id == team.id).first()
@@ -636,3 +648,200 @@ class ScraperService:
             self.db.rollback()
             logger.error(f"❌ Error crítico ingestando clasificación: {e}")
             return False
+
+    def sync_roster(self, id_equipo_hash):
+        """Fetch roster from federation and sync federation IDs, PPG, MPG."""
+        id_equipo_hash = str(id_equipo_hash).replace('"', '').replace("'", "").strip()
+        url = f"{self.base_url}/equipo.ashx"
+
+        payload = {
+            "accion": "jugadores",
+            "id_equipo": id_equipo_hash,
+            "id_dispositivo": self.id_dispositivo,
+            "key": self.key,
+        }
+
+        try:
+            logger.info("🔄 Sincronizando roster (federation IDs)...")
+            r = requests.post(url, data=urlencode(payload), headers=self.headers, verify=False, timeout=15)
+            data = r.json()
+
+            if data.get("resultado") != "correcto":
+                logger.error(f"❌ Error roster sync: {data.get('error')}")
+                return False
+
+            if data.get("key"):
+                self.key = data["key"]
+
+            jugadores = data.get("misjugadores", [])
+            count = 0
+
+            for j in jugadores:
+                fed_name = j.get("Nombre", "")
+                fed_id = j.get("Id", "")
+                ppg = j.get("PuntosPorPartido", 0)
+                mpg = j.get("MinutosPorPartido", 0)
+
+                # Match by normalized name
+                import unicodedata
+                clean_name = " ".join(fed_name.split()).title()
+                clean_name = ''.join(c for c in unicodedata.normalize('NFD', clean_name)
+                                     if unicodedata.category(c) != 'Mn')
+
+                player = self.db.query(Player).filter(Player.name == clean_name).first()
+                if not player:
+                    continue
+
+                updated = False
+                if fed_id and player.federation_id != fed_id:
+                    player.federation_id = fed_id
+                    updated = True
+                if ppg and player.ppg != ppg:
+                    player.ppg = ppg
+                    updated = True
+                if mpg and player.mpg != mpg:
+                    player.mpg = mpg
+                    updated = True
+
+                if updated:
+                    count += 1
+
+            self.db.commit()
+            logger.info(f"✅ Roster sincronizado: {count} jugadores actualizados, {len(jugadores)} en federation.")
+            return True
+
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"❌ Error sincronizando roster: {e}")
+            return False
+
+    def sync_player_federation_stats(self, player_id: int) -> bool:
+        """Fetch federation API for player season stats and save to DB."""
+        from app.models.stats import PlayerSeasonStat
+        
+        player = self.db.query(Player).filter(Player.id == player_id).first()
+        if not player or not player.federation_id:
+            return False
+
+        url = f"{self.base_url}/jugador.ashx"
+        id_equipo_hash = player.team.federation_hex if player.team and player.team.federation_hex else str(settings.FEDERATION_ID_EQUIPO_PROPIO).replace('"', '').replace("'", "").strip()
+
+        payload = {
+            "accion": "datosGlobalesJugadorEquipo",
+            "id_dispositivo": self.id_dispositivo,
+            "key": self.key,
+            "id_jugador": player.federation_id,
+            "id_equipo": id_equipo_hash,
+            "id_componente_club": player.componente_id or "",
+            "id_temporada": "32005100440055006700580046004800690048006600680054006100410053002B0030004F005500730051003D003D00",
+        }
+
+        try:
+            r = requests.post(url, data=urlencode(payload), headers=self.headers, verify=False, timeout=15)
+            data = r.json()
+
+            if data.get("resultado") != "correcto":
+                logger.error(f"❌ Error syncing player stats: {data.get('error')}")
+                return False
+
+            if data.get("key"):
+                self.key = data["key"]
+
+            raw_stats = data
+
+            stat = self.db.query(PlayerSeasonStat).filter(PlayerSeasonStat.player_id == player_id).first()
+            if not stat:
+                stat = PlayerSeasonStat(player_id=player_id)
+                self.db.add(stat)
+
+            stat.minutes_avg = float(raw_stats.get("minutosMediaJugador", 0) or 0)
+            stat.points_avg = float(raw_stats.get("PuntosMediaJugador", 0) or 0)
+            stat.valoracion_avg = float(raw_stats.get("ValoracionMediaJugador", 0) or 0)
+            stat.mas_menos_avg = float(raw_stats.get("MasMenosMediaJugador", 0) or 0)
+            stat.rebounds_avg = float(raw_stats.get("RebotesMediaJugador", 0) or 0)
+            stat.assists_avg = float(raw_stats.get("AsistenciaMediaJugador", 0) or 0)
+            stat.steals_avg = float(raw_stats.get("RecuperacionesMediaJugador", 0) or 0)
+            stat.turnovers_avg = float(raw_stats.get("PerdidasMediaJugador", 0) or 0)
+            stat.blocks_avg = float(raw_stats.get("TaponesCometidoMediaJugador", 0) or 0)
+            stat.fouls_drawn_avg = float(raw_stats.get("FaltaRecibidaMediaJugador", 0) or 0)
+            stat.fouls_committed_avg = float(raw_stats.get("FaltaCometidaMediaJugador", 0) or 0)
+
+            stat.league_minutes_avg = float(raw_stats.get("minutosMedia", 0) or 0)
+            stat.league_points_avg = float(raw_stats.get("PuntosMedia", 0) or 0)
+            stat.league_valoracion_avg = float(raw_stats.get("ValoracionMedia", 0) or 0)
+            stat.league_mas_menos_avg = float(raw_stats.get("MasMenosMedia", 0) or 0)
+            stat.league_rebounds_avg = float(raw_stats.get("RebotesMedia", 0) or 0)
+            stat.league_assists_avg = float(raw_stats.get("AsistenciaMedia", 0) or 0)
+            stat.league_steals_avg = float(raw_stats.get("RecuperacionesMedia", 0) or 0)
+            stat.league_turnovers_avg = float(raw_stats.get("PerdidasMedia", 0) or 0)
+            stat.league_blocks_avg = float(raw_stats.get("TaponesCometidoMedia", 0) or 0)
+            stat.league_fouls_drawn_avg = float(raw_stats.get("FaltaRecibidaMedia", 0) or 0)
+            stat.league_fouls_committed_avg = float(raw_stats.get("FaltaCometidaMedia", 0) or 0)
+
+            stat.ft_pct = float(raw_stats.get("PorcentajeTirosLibresJugador", 0) or 0)
+            stat.fg_pct = float(raw_stats.get("PorcentajeTirosCampoJugador", 0) or 0)
+            stat.two_pct = float(raw_stats.get("PorcentajeTirosDe2Jugador", 0) or 0)
+            stat.three_pct = float(raw_stats.get("PorcentajeTriplesJugador", 0) or 0)
+
+            stat.league_ft_pct = float(raw_stats.get("PorcentajeTirosLibres", 0) or 0)
+            stat.league_fg_pct = float(raw_stats.get("PorcentajeTirosCampo", 0) or 0)
+            stat.league_two_pct = float(raw_stats.get("PorcentajeTirosDe2", 0) or 0)
+            stat.league_three_pct = float(raw_stats.get("PorcentajeTriples", 0) or 0)
+
+            points_avg = float(raw_stats.get("PuntosMediaJugador", 1) or 1)
+            points_avg = max(points_avg, 0.1)
+            stat.games_played = int(float(raw_stats.get("minutosMediaJugador", 0) or 0) > 0 and float(raw_stats.get("PuntosTotalesJugador", 0) or 0) / points_avg)
+            
+            stat.total_points = int(float(raw_stats.get("PuntosTotalesJugador", 0) or 0))
+            stat.total_minutes = str(raw_stats.get("MinutosTotalesJugador", "00:00"))
+            stat.total_valoracion = int(float(raw_stats.get("ValoracionTotalJugador", 0) or 0))
+            stat.total_rebounds = int(float(raw_stats.get("RebotesTotalesJugador", 0) or 0))
+            stat.total_assists = int(float(raw_stats.get("AsistenciasTotalesJugador", 0) or 0))
+            stat.total_steals = int(float(raw_stats.get("RecuperacionesTotalesJugador", 0) or 0))
+            stat.total_turnovers = int(float(raw_stats.get("PerdidasTotalesJugador", 0) or 0))
+            stat.total_blocks = int(float(raw_stats.get("TaponesCometidosTotalesJugador", 0) or 0))
+
+            self.db.commit()
+            return True
+
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"❌ Error syncing federation player stats: {e}")
+            return False
+
+    def ingest_game_video(self, game_id: str):
+        """Fetch and store YouTube video URL for a game."""
+        url = f"{self.base_url}/envivo/videos.ashx"
+
+        payload = {
+            "id_dispositivo": self.id_dispositivo,
+            "key": self.key,
+            "id_partido": game_id,
+        }
+
+        try:
+            r = requests.post(url, data=urlencode(payload), headers=self.headers, verify=False, timeout=15)
+            data = r.json()
+
+            if data.get("resultado") != "correcto":
+                return False
+
+            if data.get("key"):
+                self.key = data["key"]
+
+            videos = data.get("videos", [])
+            if videos and len(videos) > 0:
+                video_url = videos[0].get("url", "")
+                if video_url:
+                    game = self.db.query(Game).filter(Game.id == game_id).first()
+                    if game and game.video_url != video_url:
+                        game.video_url = video_url
+                        self.db.commit()
+                        return True
+
+            return False
+
+        except Exception as e:
+            logger.error(f"❌ Error fetching game video: {e}")
+            return False
+

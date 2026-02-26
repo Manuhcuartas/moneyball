@@ -34,6 +34,8 @@ def get_advanced_stats(db: Session, min_games: int = 3, min_minutes: int = 10) -
             PlayerStat.t3_anotados,
             PlayerStat.t3_intentados,
             Player.name.label("nombre"),
+            Player.ppg.label("official_ppg"),
+            Player.mpg.label("official_mpg"),
             Team.name.label("equipo"),
         )
         .join(Player, PlayerStat.player_id == Player.id)
@@ -97,6 +99,8 @@ def get_advanced_stats(db: Session, min_games: int = 3, min_minutes: int = 10) -
         .agg({
             "dorsal": get_mode,
             "game_id": "count",
+            "official_mpg": "first",
+            "official_ppg": "first",
             "MP": "mean",
             "puntos": "mean",
             "rebotes_total": "mean",
@@ -157,11 +161,15 @@ def get_advanced_stats(db: Session, min_games: int = 3, min_minutes: int = 10) -
 
     # 9. Final column rename
     final_stats.columns = [
-        "Jugador", "Equipo", "Dorsal", "PJ", "MPP", "PPP", "RPP", "ROf", "RDef", "Rec", "APP",
+        "Jugador", "Equipo", "Dorsal", "PJ", "Official_MPG", "Official_PPG", "MPP", "PPP", "RPP", "ROf", "RDef", "Rec", "APP",
         "perdidas_mean", "t3_intentados_mean", "3P_pct_real", "fga_mean",
         "USG%", "TS%", "eFG%", "GmSc", "Corner_Freq", "Rim_Freq",
         "P_USG", "P_AST", "P_REB", "P_3PA", "P_EFF", "P_DEF", "Rol Tactical",
     ]
+
+    # For display consistency: if official PPG/MPG is missing or 0, fallback to calculated
+    final_stats["PPP"] = final_stats.apply(lambda row: row["Official_PPG"] if pd.notnull(row["Official_PPG"]) and row["Official_PPG"] > 0 else row["PPP"], axis=1)
+    final_stats["MPP"] = final_stats.apply(lambda row: row["Official_MPG"] if pd.notnull(row["Official_MPG"]) and row["Official_MPG"] > 0 else row["MPP"], axis=1)
 
     final_stats = final_stats[
         (final_stats["PJ"] >= min_games) & (final_stats["MPP"] >= min_minutes)

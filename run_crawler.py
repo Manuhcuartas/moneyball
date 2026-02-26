@@ -44,6 +44,13 @@ def main():
     # Ingest standings
     scraper.ingest_standings()
 
+    # Sync rosters for all teams (federation IDs, PPG, MPG)
+    from app.models.stats import Team
+    teams_with_hex = db.query(Team).filter(Team.federation_hex.isnot(None)).all()
+    print(f"🔄 Sincronizando rosters de {len(teams_with_hex)} equipos...")
+    for team in teams_with_hex:
+        scraper.sync_roster(team.federation_hex)
+
     # Processing loop
     count_scraped = 0
     count_skipped = 0
@@ -69,6 +76,7 @@ def main():
             if stats_ok:
                 shots_ok = scraper.ingest_shot_chart(game['id'])
                 pbp_ok = scraper.ingest_play_by_play(game['id'])
+                video_ok = scraper.ingest_game_video(game['id'])
 
                 if shots_ok:
                     print("   ✅ TODO OK")
@@ -88,6 +96,9 @@ def main():
     print(f"📊 Resumen de Ejecución:")
     print(f"   - Procesados (Nuevos/Actualizados): {count_scraped}")
     print(f"   - Omitidos (Ya existían): {count_skipped}")
+
+    from app.services.stats_aggregation import calculate_all_season_stats
+    calculate_all_season_stats(db)
 
     db.close()
     print("\n✨ PROCESO COMPLETADO ✨")
